@@ -13,7 +13,7 @@ FS25 Lua mod  --TCP JSON lines-->  Node bridge  --WebSocket-->  Tablet webapp
 # Terminal 1 — bridge with animated mock farm
 cd server
 npm install
-npm run mock
+npm run mock   # works on Windows/macOS/Linux (sets MB_LIVEMAP_MOCK via cross-env)
 
 # Terminal 2 — tablet dashboard
 cd web
