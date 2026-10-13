@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CommandResult, Vehicle, WhitelistAction } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +29,7 @@ export function VehicleSheet({
 }: Props) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+  const openedAtRef = useRef(0);
 
   useEffect(() => {
     if (!lastResult || !pendingId) return;
@@ -45,6 +46,8 @@ export function VehicleSheet({
     if (!open) {
       setFeedback(null);
       setPendingId(null);
+    } else {
+      openedAtRef.current = Date.now();
     }
   }, [open]);
 
@@ -58,7 +61,15 @@ export function VehicleSheet({
   return (
     <Sheet
       open={open}
-      onOpenChange={(next) => {
+      onOpenChange={(next, details) => {
+        // Ignore the opening pointer's outsidePress so the sheet stays open.
+        if (
+          !next &&
+          details?.reason === "outsidePress" &&
+          Date.now() - openedAtRef.current < 400
+        ) {
+          return;
+        }
         onOpenChange(next);
       }}
     >
