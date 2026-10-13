@@ -37,7 +37,9 @@ export function VehicleSheet({
     setPendingId(null);
     setFeedback(
       lastResult.ok
-        ? "Command acknowledged"
+        ? lastResult.error
+          ? lastResult.error
+          : "Command OK — state will refresh from the bridge"
         : lastResult.error ?? "Command failed",
     );
   }, [lastResult, pendingId]);
@@ -53,7 +55,13 @@ export function VehicleSheet({
 
   const run = (action: WhitelistAction) => {
     if (!vehicle) return;
-    setFeedback(null);
+    setFeedback(
+      action === "engine.stop"
+        ? "Stopping engine…"
+        : action === "engine.start"
+          ? "Starting engine…"
+          : "Sending command…",
+    );
     const id = onCommand(action, vehicle.id);
     setPendingId(id);
   };
@@ -61,6 +69,8 @@ export function VehicleSheet({
   return (
     <Sheet
       open={open}
+      // Keep the Vehicles rail clickable while the sheet is open.
+      modal="trap-focus"
       onOpenChange={(next, details) => {
         // Ignore the opening pointer's outsidePress so the sheet stays open.
         if (
@@ -89,7 +99,14 @@ export function VehicleSheet({
             </SheetHeader>
 
             <div className="mt-4 flex flex-wrap gap-2">
-              <Badge variant={vehicle.engineOn ? "default" : "secondary"}>
+              <Badge
+                variant={vehicle.engineOn ? "default" : "secondary"}
+                className={
+                  vehicle.engineOn
+                    ? "bg-lime-700 text-white"
+                    : "bg-stone-300 text-stone-800"
+                }
+              >
                 Engine {vehicle.engineOn ? "on" : "off"}
               </Badge>
               <Badge variant="outline">
@@ -158,15 +175,20 @@ export function VehicleSheet({
             </p>
 
             {(pendingId || feedback) && (
-              <p
-                className={`mt-3 text-sm ${
-                  feedback?.includes("fail") || feedback?.includes("unsupport") || feedback?.includes("not")
-                    ? "text-amber-800"
-                    : "text-emerald-800"
+              <div
+                role="status"
+                className={`mt-4 rounded-lg px-3 py-2 text-sm font-medium ${
+                  feedback?.toLowerCase().includes("fail") ||
+                  feedback?.toLowerCase().includes("unsupport") ||
+                  feedback?.toLowerCase().includes("error")
+                    ? "bg-amber-100 text-amber-950"
+                    : pendingId
+                      ? "bg-stone-200 text-stone-800"
+                      : "bg-emerald-100 text-emerald-950"
                 }`}
               >
-                {pendingId ? "Sending command…" : feedback}
-              </p>
+                {feedback ?? "Sending command…"}
+              </div>
             )}
           </>
         ) : null}

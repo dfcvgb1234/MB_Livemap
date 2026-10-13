@@ -15,6 +15,10 @@ export default function HomePage() {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const loading = connection === "connecting" && !state;
+  const liveSelected =
+    selected == null
+      ? null
+      : (state?.vehicles.find((v) => v.id === selected.id) ?? selected);
 
   const openVehicle = (v: Vehicle) => {
     setSelected(v);
@@ -35,7 +39,7 @@ export default function HomePage() {
         ) : (
           <Livemap
             state={state}
-            selectedId={selected?.id}
+            selectedId={liveSelected?.id}
             onSelectVehicle={openVehicle}
           />
         )}
@@ -49,14 +53,14 @@ export default function HomePage() {
       <div className="space-y-4 px-4 sm:px-0">
         <VehicleRail
           vehicles={state?.vehicles ?? []}
-          selectedId={selected?.id}
+          selectedId={liveSelected?.id}
           onSelect={openVehicle}
         />
         <CropCalendar fields={state?.fields ?? []} />
       </div>
 
       <VehicleSheet
-        vehicle={selected}
+        vehicle={liveSelected}
         open={sheetOpen}
         onOpenChange={(next) => setSheetOpen(next)}
         onCommand={sendCommand}
