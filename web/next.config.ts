@@ -1,9 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  cacheComponents: true,
-  partialPrefetching: true,
+  // Realtime tablet app — avoid Cache Components prerender constraints (Date/WS).
   turbopack: {
     rules: {
       "*.css": {

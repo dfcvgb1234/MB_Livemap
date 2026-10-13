@@ -20,7 +20,7 @@ export default function AnimalsPage() {
   const { state, connection } = useLivemapContext();
   const animals = state?.animals ?? [];
 
-  if (connection === "connecting" && !state) {
+  if ((connection === "connecting" || connection === "reconnecting") && !state) {
     return (
       <div className="flex flex-1 items-center justify-center px-4 py-16 text-stone-600">
         Loading animals…

@@ -1,5 +1,6 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { CROP_CALENDAR, MONTHS, fruitColor } from "@/lib/crop-calendar";
 import type { Field } from "@/lib/types";
 import { growthLabel } from "@/lib/crop-calendar";
@@ -8,8 +9,20 @@ type Props = {
   fields: Field[];
 };
 
+function subscribe() {
+  return () => {};
+}
+
+function getMonth() {
+  return new Date().getMonth() + 1;
+}
+
+function getServerMonth() {
+  return 1;
+}
+
 export function CropCalendar({ fields }: Props) {
-  const month = new Date().getMonth() + 1;
+  const month = useSyncExternalStore(subscribe, getMonth, getServerMonth);
   const present = new Set(
     fields.map((f) => f.fruitType).filter(Boolean) as string[],
   );

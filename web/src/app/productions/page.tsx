@@ -41,7 +41,7 @@ export default function ProductionsPage() {
   const { state, connection } = useLivemapContext();
   const productions = state?.productions ?? [];
 
-  if (connection === "connecting" && !state) {
+  if ((connection === "connecting" || connection === "reconnecting") && !state) {
     return (
       <div className="flex flex-1 items-center justify-center px-4 py-16 text-stone-600">
         Loading productions…
