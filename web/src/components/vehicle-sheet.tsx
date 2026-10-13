@@ -56,7 +56,12 @@ export function VehicleSheet({
   };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
+    <Sheet
+      open={open}
+      onOpenChange={(next) => {
+        onOpenChange(next);
+      }}
+    >
       <SheetContent
         side="bottom"
         className="max-h-[85vh] rounded-t-2xl border-stone-200 bg-stone-50 px-5 pb-8 pt-4 sm:max-w-lg sm:mx-auto"

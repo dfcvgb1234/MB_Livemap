@@ -31,12 +31,15 @@ export default function HomePage() {
             selectedId={selected?.id}
             onSelectVehicle={(v) => {
               setSelected(v);
-              setSheetOpen(true);
+              // Defer open so the same pointer event cannot dismiss the sheet.
+              requestAnimationFrame(() => setSheetOpen(true));
             }}
           />
         )}
-        <div className="absolute left-3 right-3 top-3 z-20 sm:left-4 sm:right-auto sm:w-[min(100%,28rem)]">
-          <WeatherStrip weather={state?.weather ?? null} />
+        <div className="pointer-events-none absolute left-3 right-3 top-3 z-20 sm:left-4 sm:right-auto sm:w-[min(100%,28rem)]">
+          <div className="pointer-events-auto">
+            <WeatherStrip weather={state?.weather ?? null} />
+          </div>
         </div>
       </section>
 
@@ -47,7 +50,7 @@ export default function HomePage() {
       <VehicleSheet
         vehicle={selected}
         open={sheetOpen}
-        onOpenChange={setSheetOpen}
+        onOpenChange={(next) => setSheetOpen(next)}
         onCommand={sendCommand}
         lastResult={lastResult}
       />

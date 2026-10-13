@@ -115,9 +115,10 @@ export function Livemap({ state, onSelectVehicle, selectedId }: Props) {
 
       {hasPolygons ? (
         <svg
-          className="absolute inset-0 h-full w-full"
+          className="pointer-events-none absolute inset-0 z-0 h-full w-full"
           viewBox="0 0 100 100"
           preserveAspectRatio="none"
+          aria-hidden
         >
           {fields.map((f) => (
             <FieldPolygon key={f.id} field={f} mapSize={mapSize} />
@@ -138,18 +139,22 @@ export function Livemap({ state, onSelectVehicle, selectedId }: Props) {
             key={v.id}
             type="button"
             className={cn(
-              "absolute z-10 flex -translate-x-1/2 -translate-y-1/2 touch-manipulation flex-col items-center",
-              "min-h-11 min-w-11",
+              "absolute z-30 flex -translate-x-1/2 -translate-y-1/2 touch-manipulation flex-col items-center",
+              "min-h-14 min-w-14 cursor-pointer select-none p-1",
             )}
             style={{ left: pos.left, top: pos.top }}
-            onClick={() => onSelectVehicle(v)}
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onSelectVehicle(v);
+            }}
             onMouseEnter={() => setHovered(v.id)}
             onMouseLeave={() => setHovered(null)}
             aria-label={`${v.name}, ${v.engineOn ? "engine on" : "engine off"}`}
           >
             <span
               className={cn(
-                "flex size-10 items-center justify-center rounded-full shadow-lg transition-transform",
+                "pointer-events-none flex size-12 items-center justify-center rounded-full shadow-lg transition-transform",
                 v.engineOn ? "bg-lime-500 text-stone-950" : "bg-stone-700 text-stone-100",
                 active && "scale-110 ring-2 ring-white",
               )}
@@ -164,7 +169,7 @@ export function Livemap({ state, onSelectVehicle, selectedId }: Props) {
             </span>
             <span
               className={cn(
-                "mt-1 max-w-[7rem] truncate rounded bg-stone-950/75 px-1.5 py-0.5 text-[11px] font-medium text-stone-100",
+                "pointer-events-none mt-1 max-w-[7rem] truncate rounded bg-stone-950/75 px-1.5 py-0.5 text-[11px] font-medium text-stone-100",
                 !active && "opacity-80",
               )}
             >
@@ -182,11 +187,6 @@ export function Livemap({ state, onSelectVehicle, selectedId }: Props) {
           {vehicles.length} vehicles · {fields.length} fields ·{" "}
           {state.source === "mock" ? "mock" : "mod"}
         </div>
-      </div>
-
-      {/* Drop-in hint */}
-      <div className="pointer-events-none absolute bottom-3 right-3 z-20 max-w-[14rem] rounded-lg bg-stone-950/60 px-2 py-1.5 text-[10px] text-stone-400 backdrop-blur">
-        Optional: place map PNG at <code className="text-stone-300">web/public/map-overlay.png</code>
       </div>
     </div>
   );

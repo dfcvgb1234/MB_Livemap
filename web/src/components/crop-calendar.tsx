@@ -65,7 +65,7 @@ export function CropCalendar({ fields }: Props) {
                   className="size-2.5 rounded-full"
                   style={{ background: fruitColor(f.fruitType) }}
                 />
-                Field {f.id}
+                {/^field[-_]?/i.test(f.id) ? f.id.replace(/^field[-_]?/i, "Field ") : `Field ${f.id}`}
                 <span className="font-normal text-stone-500">
                   {f.fruitType ?? "unknown crop"}
                 </span>
