@@ -17,7 +17,8 @@ function clamp(n: number, min: number, max: number) {
 
 /** Deterministic-ish mock farm state that gently animates for demos. */
 export function createMockState(t = Date.now()): GameState {
-  const phase = (t / 1000) % 360;
+  // Slow phase so map markers stay easy to tap during demos.
+  const phase = (t / 8000) % 360;
   const rad = (phase * Math.PI) / 180;
   const mapSize = 2048;
   const mid = mapSize / 2;
@@ -27,10 +28,10 @@ export function createMockState(t = Date.now()): GameState {
       id: "v-tractor-1",
       name: "Fendt 942",
       type: "tractor",
-      x: mid + Math.cos(rad) * 220,
-      z: mid + Math.sin(rad) * 180,
+      x: mid + Math.cos(rad) * 180,
+      z: mid + Math.sin(rad) * 140,
       heading: ((phase + 90) % 360) * (Math.PI / 180),
-      speed: 18 + Math.sin(rad * 2) * 4,
+      speed: 12 + Math.sin(rad * 2) * 2,
       engineOn: true,
       attached: ["Seeder"],
     },
@@ -38,7 +39,7 @@ export function createMockState(t = Date.now()): GameState {
       id: "v-harvester-1",
       name: "Lexion 8900",
       type: "harvester",
-      x: mid - 160 + Math.sin(rad * 0.7) * 40,
+      x: mid - 160 + Math.sin(rad * 0.4) * 20,
       z: mid + 280,
       heading: Math.PI * 0.15,
       speed: 8,
@@ -50,7 +51,7 @@ export function createMockState(t = Date.now()): GameState {
       name: "MAN TGS",
       type: "truck",
       x: mid + 340,
-      z: mid - 90 + Math.cos(rad * 1.3) * 30,
+      z: mid - 90,
       heading: -Math.PI / 2,
       speed: 0,
       engineOn: false,
@@ -192,7 +193,7 @@ export function createMockState(t = Date.now()): GameState {
 
 export function startMockInjector(
   onState: (state: GameState) => void,
-  hz = 2,
+  hz = 1,
 ): () => void {
   const interval = setInterval(() => {
     onState(createMockState(Date.now()));

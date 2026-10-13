@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Livemap } from "@/components/livemap";
 import { WeatherStrip } from "@/components/weather-strip";
 import { CropCalendar } from "@/components/crop-calendar";
+import { VehicleRail } from "@/components/vehicle-rail";
 import { VehicleSheet } from "@/components/vehicle-sheet";
 import { useLivemapContext } from "@/components/livemap-provider";
 import type { Vehicle } from "@/lib/types";
@@ -14,6 +15,12 @@ export default function HomePage() {
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const loading = connection === "connecting" && !state;
+
+  const openVehicle = (v: Vehicle) => {
+    setSelected(v);
+    // Defer open so the same pointer event cannot dismiss the sheet.
+    window.setTimeout(() => setSheetOpen(true), 0);
+  };
 
   return (
     <div className="flex flex-1 flex-col gap-4">
@@ -29,11 +36,7 @@ export default function HomePage() {
           <Livemap
             state={state}
             selectedId={selected?.id}
-            onSelectVehicle={(v) => {
-              setSelected(v);
-              // Defer open so the same pointer event cannot dismiss the sheet.
-              requestAnimationFrame(() => setSheetOpen(true));
-            }}
+            onSelectVehicle={openVehicle}
           />
         )}
         <div className="pointer-events-none absolute left-3 right-3 top-3 z-20 sm:left-4 sm:right-auto sm:w-[min(100%,28rem)]">
@@ -43,7 +46,12 @@ export default function HomePage() {
         </div>
       </section>
 
-      <div className="px-4 sm:px-0">
+      <div className="space-y-4 px-4 sm:px-0">
+        <VehicleRail
+          vehicles={state?.vehicles ?? []}
+          selectedId={selected?.id}
+          onSelect={openVehicle}
+        />
         <CropCalendar fields={state?.fields ?? []} />
       </div>
 
