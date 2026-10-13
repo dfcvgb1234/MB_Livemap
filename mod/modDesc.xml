@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8" standalone="no" ?>
+<modDesc descVersion="92">
+    <author>MB Livemap</author>
+    <version>0.1.0.0</version>
+    <title>
+        <en>MB Livemap Bridge</en>
+    </title>
+    <description>
+        <en>
+            Sends farm state (vehicles, weather, fields, productions, animals) to a local
+            companion bridge over TCP JSON-lines, and accepts whitelisted vehicle commands
+            (engine start/stop, attach/detach) from the tablet dashboard.
+        </en>
+    </description>
+    <iconFilename>icon.png</iconFilename>
+    <multiplayer supported="false"/>
+    <extraSourceFiles>
+        <sourceFile filename="register.lua"/>
+    </extraSourceFiles>
+</modDesc>
