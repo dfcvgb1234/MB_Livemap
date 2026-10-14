@@ -3,9 +3,11 @@
 Local-only Farming Simulator 25 companion: a Lua mod streams farm state to a Node bridge, which fans out over WebSocket to a tablet-first Next.js dashboard.
 
 ```
-FS25 Lua mod  --TCP JSON lines-->  Node bridge  --WebSocket-->  Tablet webapp
-                     :18765              :18766
+FS25 Lua mod  --named pipe JSON lines-->  Node bridge  --WebSocket-->  Tablet webapp
+              \\.\pipe\mb-livemap              :18766
 ```
+
+FS25 mods cannot load LuaSocket. On Windows the mod writes state to the named pipe above. Vehicle commands go back through `modSettings/FS25_MB_Livemap/commands.xml`.
 
 ## Quick start (UI without the game)
 
@@ -13,7 +15,7 @@ FS25 Lua mod  --TCP JSON lines-->  Node bridge  --WebSocket-->  Tablet webapp
 # Terminal 1 — bridge with animated mock farm
 cd server
 npm install
-npm run mock
+npm run mock   # works on Windows/macOS/Linux (sets MB_LIVEMAP_MOCK via cross-env)
 
 # Terminal 2 — tablet dashboard
 cd web
@@ -23,7 +25,7 @@ npm run dev
 
 Open **[http://127.0.0.1:43127](http://127.0.0.1:43127)**.
 
-- Bridge TCP (mod): `127.0.0.1:18765`
+- Bridge pipe (mod): `\\.\pipe\mb-livemap`
 - Bridge WebSocket: `127.0.0.1:18766`
 - Bridge health: `http://127.0.0.1:18767/health`
 
@@ -31,18 +33,17 @@ Open **[http://127.0.0.1:43127](http://127.0.0.1:43127)**.
 
 1. Copy `mod/` to your FS25 mods folder as `FS25_MB_Livemap`:
    - Windows: `%USERPROFILE%\Documents\My Games\FarmingSimulator2025\mods\FS25_MB_Livemap`
-2. Start the bridge **before** loading a save (`cd server && npm start`). Omit mock once the game is connected — live mod snapshots replace mock automatically.
+2. Double-click `StartLivemap.bat` before you load a save. It starts the bridge and the dashboard, then opens http://127.0.0.1:43127. Leave those two windows open while you play.
 3. Enable **MB Livemap Bridge** in the mod selection screen and load a savegame.
-4. Open the web dashboard on this machine (or later on LAN with `MB_LIVEMAP_TOKEN` set).
 
-See `mod/README.md` for protocol notes and LuaSocket requirements.
+See `mod/README.md` for protocol notes. The game must be restarted after updating the mod zip.
 
 ## Repo layout
 
 | Path | Role |
 |------|------|
 | `mod/` | FS25 Lua mod — snapshots + whitelisted commands |
-| `server/` | TCP ↔ WebSocket bridge, state cache, mock injector |
+| `server/` | Named-pipe ↔ WebSocket bridge, state cache, mock injector |
 | `web/` | Next.js tablet UI (home livemap, productions, animals) |
 
 ## Commands (whitelist)
@@ -62,7 +63,9 @@ Place an optional top-down map PNG at `web/public/map-overlay.png` (from your ma
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `MB_LIVEMAP_TCP_PORT` | `18765` | Mod TCP port |
+| `MB_LIVEMAP_TCP_PORT` | `18765` | Legacy TCP port (unused by the FS25 mod) |
+| `MB_LIVEMAP_PIPE` | `\\.\pipe\mb-livemap` | Named pipe the mod writes to |
+| `MB_LIVEMAP_SETTINGS_DIR` | `Documents/My Games/FarmingSimulator2025/modSettings/FS25_MB_Livemap` | Command and session XML |
 | `MB_LIVEMAP_WS_PORT` | `18766` | Browser WebSocket port |
 | `MB_LIVEMAP_HTTP_PORT` | `18767` | Health / mock control HTTP |
 | `MB_LIVEMAP_MOCK` | unset | `1` to enable mock injector |

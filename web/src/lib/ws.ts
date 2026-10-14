@@ -1,7 +1,10 @@
 import type {
+  AutoDriveGraph,
+  AutoDriveMode,
   CommandMessage,
   CommandResult,
   GameState,
+  LivemapNotification,
   StatusMessage,
   WhitelistAction,
 } from "./types";
@@ -18,6 +21,7 @@ export function createCommand(
   action: WhitelistAction,
   vehicleId: string,
   targetId?: string,
+  extra?: { mode?: AutoDriveMode; secondTargetId?: string; fillType?: string },
 ): CommandMessage {
   return {
     type: "command",
@@ -28,13 +32,18 @@ export function createCommand(
     action,
     vehicleId,
     ...(targetId ? { targetId } : {}),
+    ...(extra?.mode ? { mode: extra.mode } : {}),
+    ...(extra?.secondTargetId ? { secondTargetId: extra.secondTargetId } : {}),
+    ...(extra?.fillType ? { fillType: extra.fillType } : {}),
   };
 }
 
 export type WsHandlers = {
   onState?: (state: GameState) => void;
+  onAutoDrive?: (graph: AutoDriveGraph) => void;
   onStatus?: (status: StatusMessage) => void;
   onCommandResult?: (result: CommandResult) => void;
+  onNotification?: (note: LivemapNotification) => void;
   onConnection?: (connected: boolean) => void;
   onError?: (message: string) => void;
 };
@@ -64,13 +73,15 @@ export class LivemapSocket {
     }
 
     this.ws.onopen = () => {
+      if (this.closedByUser) return;
       this.retryMs = 800;
       this.handlers.onConnection?.(true);
     };
 
     this.ws.onclose = () => {
+      if (this.closedByUser) return;
       this.handlers.onConnection?.(false);
-      if (!this.closedByUser) this.scheduleRetry();
+      this.scheduleRetry();
     };
 
     this.ws.onerror = () => {
@@ -87,10 +98,14 @@ export class LivemapSocket {
       if (!msg || typeof msg !== "object") return;
       const typed = msg as { type?: string };
       if (typed.type === "state") this.handlers.onState?.(msg as GameState);
+      else if (typed.type === "autodrive")
+        this.handlers.onAutoDrive?.(msg as AutoDriveGraph);
       else if (typed.type === "status")
         this.handlers.onStatus?.(msg as StatusMessage);
       else if (typed.type === "commandResult")
         this.handlers.onCommandResult?.(msg as CommandResult);
+      else if (typed.type === "notification")
+        this.handlers.onNotification?.(msg as LivemapNotification);
       else if (typed.type === "error")
         this.handlers.onError?.((msg as { message?: string }).message ?? "Error");
     };

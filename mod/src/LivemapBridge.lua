@@ -5,14 +5,18 @@ LivemapBridge.__index = LivemapBridge
 
 local VEHICLE_INTERVAL_MS = 400 -- ~2.5 Hz
 local SLOW_INTERVAL_MS = 5000
+local AD_INTERVAL_MS = 2000
 
 function LivemapBridge.new()
     local self = setmetatable({}, LivemapBridge)
     self.tcp = TcpClient.new("127.0.0.1", 18765)
     self.collector = StateCollector.new()
+    self.autoDrive = AutoDriveSync.new()
     self.commands = CommandHandler.new()
     self.vehicleAccum = 0
     self.slowAccum = SLOW_INTERVAL_MS -- force immediate slow refresh
+    self.adAccum = 0
+    self.wasConnected = false
     self.running = false
     self.updateFn = nil
 
@@ -53,15 +57,60 @@ function LivemapBridge:stop()
     self.tcp:disconnect()
 end
 
+function LivemapBridge:sendAutoDrive(force)
+    if not self.tcp:isConnected() then
+        return
+    end
+    local message = self.autoDrive:collectIfChanged(force)
+    if message == nil then
+        return
+    end
+    if not self.tcp:sendLine(Json.encode(message)) then
+        self.autoDrive:invalidate()
+    end
+end
+
+function LivemapBridge:flushNotifications()
+    if AutoDriveNotify == nil or not self.tcp:isConnected() then
+        return
+    end
+    local items = AutoDriveNotify.drain()
+    if type(items) ~= "table" then
+        return
+    end
+    for index, item in ipairs(items) do
+        if not self.tcp:sendLine(Json.encode(item)) then
+            for restore = #items, index, -1 do
+                AutoDriveNotify.unshift(items[restore])
+            end
+            return
+        end
+    end
+end
+
 function LivemapBridge:update(dt)
     self.tcp:update()
+    self:flushNotifications()
 
     self.vehicleAccum = self.vehicleAccum + dt
     self.slowAccum = self.slowAccum + dt
+    self.adAccum = self.adAccum + dt
 
     if self.slowAccum >= SLOW_INTERVAL_MS then
         self.slowAccum = 0
         self.collector:refreshSlow()
+    end
+
+    local connected = self.tcp:isConnected()
+    if connected and not self.wasConnected then
+        self:sendAutoDrive(true)
+        self.adAccum = 0
+    end
+    self.wasConnected = connected
+
+    if connected and self.adAccum >= AD_INTERVAL_MS then
+        self.adAccum = 0
+        self:sendAutoDrive(false)
     end
 
     if self.vehicleAccum >= VEHICLE_INTERVAL_MS then

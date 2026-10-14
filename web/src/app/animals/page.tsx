@@ -22,7 +22,7 @@ export default function AnimalsPage() {
 
   if ((connection === "connecting" || connection === "reconnecting") && !state) {
     return (
-      <div className="flex flex-1 items-center justify-center px-4 py-16 text-stone-600">
+      <div className="flex flex-1 items-center justify-center px-4 py-16 text-[#b7b1a4]">
         Loading animals…
       </div>
     );
@@ -31,8 +31,8 @@ export default function AnimalsPage() {
   if (connection === "disconnected" && !state) {
     return (
       <div className="mx-4 mt-4 rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-stone-200">
-        <h1 className="text-xl font-semibold text-stone-900">Animals offline</h1>
-        <p className="mt-2 text-stone-600">
+        <h1 className="text-xl font-semibold text-[#f3efe4]">Animals offline</h1>
+        <p className="mt-2 text-[#b7b1a4]">
           Start the bridge (`npm run mock` in server/) to load husbandries.
         </p>
       </div>
@@ -42,8 +42,8 @@ export default function AnimalsPage() {
   if (animals.length === 0) {
     return (
       <div className="mx-4 mt-4 rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-stone-200">
-        <h1 className="text-xl font-semibold text-stone-900">No animals</h1>
-        <p className="mt-2 text-stone-600">
+        <h1 className="text-xl font-semibold text-[#f3efe4]">No animals</h1>
+        <p className="mt-2 text-[#b7b1a4]">
           No husbandries reported yet. Build animal pens in-game or enable mock
           mode.
         </p>
@@ -54,10 +54,10 @@ export default function AnimalsPage() {
   return (
     <div className="space-y-4 px-4 sm:px-0">
       <div>
-        <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold text-stone-900">
+        <h1 className="text-2xl font-bold text-[#f3efe4]">
           Animals
         </h1>
-        <p className="text-sm text-stone-600">
+        <p className="text-sm text-[#b7b1a4]">
           Husbandry counts, health, and productivity when the game exposes them
         </p>
       </div>
@@ -75,7 +75,11 @@ export default function AnimalsPage() {
                   </Badge>
                 </div>
                 <CardDescription>
-                  {a.count != null ? `${a.count} animals` : "Count unsupported"}
+                  {a.count != null
+                    ? a.capacity != null
+                      ? `${a.count} / ${a.capacity}`
+                      : `${a.count} animals`
+                    : "Count unsupported"}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">

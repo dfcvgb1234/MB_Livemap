@@ -39,11 +39,11 @@ function FillBar({ fill }: { fill: ProductionFill }) {
 
 export default function ProductionsPage() {
   const { state, connection } = useLivemapContext();
-  const productions = state?.productions ?? [];
+  const productions = (state?.productions ?? []).filter((point) => point.status !== "unowned");
 
   if ((connection === "connecting" || connection === "reconnecting") && !state) {
     return (
-      <div className="flex flex-1 items-center justify-center px-4 py-16 text-stone-600">
+      <div className="flex flex-1 items-center justify-center px-4 py-16 text-[#b7b1a4]">
         Loading productions…
       </div>
     );
@@ -52,8 +52,8 @@ export default function ProductionsPage() {
   if (connection === "disconnected" && !state) {
     return (
       <div className="mx-4 mt-4 rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-stone-200">
-        <h1 className="text-xl font-semibold text-stone-900">Productions offline</h1>
-        <p className="mt-2 text-stone-600">
+        <h1 className="text-xl font-semibold text-[#f3efe4]">Productions offline</h1>
+        <p className="mt-2 text-[#b7b1a4]">
           Start the bridge (`npm run mock` in server/) to load production points.
         </p>
       </div>
@@ -63,8 +63,8 @@ export default function ProductionsPage() {
   if (productions.length === 0) {
     return (
       <div className="mx-4 mt-4 rounded-2xl bg-white p-8 text-center shadow-sm ring-1 ring-stone-200">
-        <h1 className="text-xl font-semibold text-stone-900">No productions</h1>
-        <p className="mt-2 text-stone-600">
+        <h1 className="text-xl font-semibold text-[#f3efe4]">No productions</h1>
+        <p className="mt-2 text-[#b7b1a4]">
           No production points reported yet. Place factories in-game or enable
           mock mode.
         </p>
@@ -75,10 +75,10 @@ export default function ProductionsPage() {
   return (
     <div className="space-y-4 px-4 sm:px-0">
       <div>
-        <h1 className="font-[family-name:var(--font-display)] text-2xl font-bold text-stone-900">
+        <h1 className="text-2xl font-bold text-[#f3efe4]">
           Productions
         </h1>
-        <p className="text-sm text-stone-600">
+        <p className="text-sm text-[#b7b1a4]">
           Input / output fill levels for owned production points
         </p>
       </div>
@@ -98,6 +98,16 @@ export default function ProductionsPage() {
               <CardDescription>ID {p.id}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              {(p.lines ?? []).length > 0 ? (
+                <div className="space-y-1">
+                  {(p.lines ?? []).map((line, index) => (
+                    <div key={`${line.name}-${index}`} className="flex justify-between text-sm">
+                      <span className="text-stone-800">{line.name}</span>
+                      <span className="text-stone-600">{line.status ?? "Unknown"}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
               <div>
                 <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-stone-500">
                   Inputs

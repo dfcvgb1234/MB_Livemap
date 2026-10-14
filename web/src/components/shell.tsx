@@ -1,35 +1,98 @@
 "use client";
 
-import { AppNav } from "@/components/app-nav";
-import { ConnectionBanner } from "@/components/connection-banner";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { Bell, Settings } from "lucide-react";
 import { LivemapProvider, useLivemapContext } from "@/components/livemap-provider";
+import { NotificationHistorySheet } from "@/components/notification-history-sheet";
+import { SettingsProvider, useSettings } from "@/components/settings-provider";
+import { SettingsSheet } from "@/components/settings-sheet";
+import { NotificationProvider, ToastStack, useNotificationCenter } from "@/components/toast-stack";
+import { cn } from "@/lib/utils";
+
+const NAV = [
+  { href: "/", label: "Livemap" },
+  { href: "/autodrive", label: "AutoDrive" },
+] as const;
+
+function formatUpdated(ts: number | null | undefined) {
+  if (!ts) return "No update yet";
+  return `Updated ${new Date(ts).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+}
 
 function ShellInner({ children }: { children: React.ReactNode }) {
-  const { connection, bridgeStatus, error } = useLivemapContext();
+  const { state, bridgeStatus } = useLivemapContext();
+  const { setOpen } = useSettings();
+  const { history, setHistoryOpen } = useNotificationCenter();
+  const pathname = usePathname();
+  const vehicles = state?.vehicles.length ?? 0;
+  const fields = state?.fields.length ?? 0;
 
   return (
-    <div className="flex min-h-full flex-1 flex-col bg-[#e8ebe3]">
-      <header className="sticky top-0 z-40 border-b border-stone-300/60 bg-[#e8ebe3]/90 px-4 py-3 backdrop-blur-md">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <p className="font-[family-name:var(--font-display)] text-2xl font-bold tracking-tight text-stone-900">
-                MB Livemap
-              </p>
-              <p className="text-xs text-stone-600">FS25 tablet dashboard</p>
-            </div>
-            <AppNav />
+    <div className="flex h-dvh flex-col bg-[radial-gradient(circle_at_top_left,rgba(226,182,87,0.08),transparent_28%),#17140f] text-[#f3efe4]">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-[18px] py-3.5">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid size-[42px] shrink-0 place-items-center rounded-lg bg-[#e2b657] text-base font-bold text-[#2a2112]">
+            MB
+          </span>
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold">{state?.mapName ?? "Livemap"}</h1>
+            <p className="text-[13px] text-[#b7b1a4]">
+              {vehicles} vehicles · {fields} fields
+            </p>
           </div>
-          <ConnectionBanner
-            connection={connection}
-            bridgeStatus={bridgeStatus}
-            error={error}
-          />
+        </div>
+        <nav className="flex items-center gap-1 rounded-xl bg-black/25 p-1">
+          {NAV.map(({ href, label }) => {
+            const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                className={cn(
+                  "rounded-lg px-3.5 py-2 text-sm font-semibold transition-colors",
+                  active ? "bg-[#e2b657] text-[#2a2112]" : "text-[#f3efe4] hover:bg-white/10",
+                )}
+              >
+                {label}
+              </Link>
+            );
+          })}
+        </nav>
+        <div className="flex shrink-0 items-center gap-2.5">
+          {bridgeStatus?.mockActive ? (
+            <span className="rounded-full bg-[#d9783c] px-2 py-1 text-xs font-bold text-[#2a160c]">
+              Mock
+            </span>
+          ) : null}
+          <span className="text-[13px] text-[#b7b1a4]">{formatUpdated(state?.ts)}</span>
+          <button
+            type="button"
+            aria-label={history.length > 0 ? `Notifications, ${history.length}` : "Notifications"}
+            onClick={() => setHistoryOpen(true)}
+            className="relative grid size-10 place-items-center rounded-lg text-[#f3efe4] hover:bg-white/10"
+          >
+            <Bell className="size-5" aria-hidden />
+            {history.length > 0 ? (
+              <span className="absolute top-1 right-1 grid min-w-4 place-items-center rounded-full bg-[#e2b657] px-1 text-[10px] font-bold text-[#2a2112]">
+                {history.length > 99 ? "99+" : history.length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            aria-label="Settings"
+            onClick={() => setOpen(true)}
+            className="grid size-10 place-items-center rounded-lg text-[#f3efe4] hover:bg-white/10"
+          >
+            <Settings className="size-5" aria-hidden />
+          </button>
         </div>
       </header>
-      <main className="mx-auto flex w-full max-w-7xl flex-1 flex-col px-0 pb-8 pt-0 sm:px-4 sm:pt-4">
-        {children}
-      </main>
+      <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+      <ToastStack />
+      <NotificationHistorySheet />
+      <SettingsSheet />
     </div>
   );
 }
@@ -37,7 +100,11 @@ function ShellInner({ children }: { children: React.ReactNode }) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <LivemapProvider>
-      <ShellInner>{children}</ShellInner>
+      <SettingsProvider>
+        <NotificationProvider>
+          <ShellInner>{children}</ShellInner>
+        </NotificationProvider>
+      </SettingsProvider>
     </LivemapProvider>
   );
 }
