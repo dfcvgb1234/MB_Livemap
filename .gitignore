@@ -10,3 +10,5 @@ web/.env*.local
 server/dist/
 *.tsbuildinfo
 .cursor/
+Examples/
+*.zip
