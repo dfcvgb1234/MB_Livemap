@@ -70,8 +70,27 @@ function LivemapBridge:sendAutoDrive(force)
     end
 end
 
+function LivemapBridge:flushNotifications()
+    if AutoDriveNotify == nil or not self.tcp:isConnected() then
+        return
+    end
+    local items = AutoDriveNotify.drain()
+    if type(items) ~= "table" then
+        return
+    end
+    for index, item in ipairs(items) do
+        if not self.tcp:sendLine(Json.encode(item)) then
+            for restore = #items, index, -1 do
+                AutoDriveNotify.unshift(items[restore])
+            end
+            return
+        end
+    end
+end
+
 function LivemapBridge:update(dt)
     self.tcp:update()
+    self:flushNotifications()
 
     self.vehicleAccum = self.vehicleAccum + dt
     self.slowAccum = self.slowAccum + dt

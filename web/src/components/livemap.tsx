@@ -3,7 +3,10 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { AutoDriveGraph, Field, GameState, Vehicle } from "@/lib/types";
 import { fruitColor } from "@/lib/crop-calendar";
+import { machineColor } from "@/lib/machine-colors";
+import type { MapImageFit } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import { useSettings } from "@/components/settings-provider";
 
 type Props = {
   state: GameState | null;
@@ -64,19 +67,19 @@ function mapFrame(
 }
 
 /**
- * PDA.png paints the playable terrain in the center half of the image.
+ * PDA images paint the playable terrain in the center half.
  * The olive border and wheat marks sit outside that square.
+ * A full-bleed image uses the whole picture as terrain.
  */
-const MAP_IMAGE_INSET = 0.25;
-
-function mapImageBox(mapSize: number, frame: MapFrame) {
+function mapImageBox(mapSize: number, frame: MapFrame, fit: MapImageFit) {
+  const inset = fit === "full" ? 0 : 0.25;
   const half = mapSize / 2;
-  const inner = 1 - MAP_IMAGE_INSET * 2;
+  const inner = 1 - inset * 2;
   const terrain = (mapSize / frame.span) * 100;
   const size = terrain / inner;
   return {
-    left: ((-half - frame.minX) / frame.span) * 100 - MAP_IMAGE_INSET * size,
-    top: ((-half - frame.minZ) / frame.span) * 100 - MAP_IMAGE_INSET * size,
+    left: ((-half - frame.minX) / frame.span) * 100 - inset * size,
+    top: ((-half - frame.minZ) / frame.span) * 100 - inset * size,
     size,
   };
 }
@@ -121,52 +124,11 @@ function zoomAt(
   );
 }
 
-const VEHICLE_COLORS: Record<string, string> = {
-  tractor: "#e2b657",
-  tractorreversedriving: "#d6c24a",
-  combinedrivable: "#e07a3d",
-  harvester: "#e07a3d",
-  forageharvester: "#c46b3a",
-  cottonharvester: "#e7a0c4",
-  beetvehicledrivable: "#d9783c",
-  truck: "#6ea8d9",
-  car: "#8fd18a",
-  train: "#d46a6a",
-  locomotive: "#d46a6a",
-  highpressurewasher: "#7eb0d4",
-  sprayer: "#7eb0d4",
-  wheelloader: "#d6c24a",
-  telehandler: "#c9a24a",
-};
-
-function vehicleArrowColor(type: string | null): string {
-  const key = (type ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
-  if (VEHICLE_COLORS[key]) return VEHICLE_COLORS[key];
-  if (key.includes("cotton")) return VEHICLE_COLORS.cottonharvester;
-  if (key.includes("combine") || key.includes("harvester") || key.includes("forage")) {
-    return VEHICLE_COLORS.harvester;
-  }
-  if (key.includes("truck")) return VEHICLE_COLORS.truck;
-  if (key.includes("loader") || key.includes("telehandler")) return VEHICLE_COLORS.wheelloader;
-  if (key.includes("tractor")) return VEHICLE_COLORS.tractor;
-  if (key.includes("car")) return VEHICLE_COLORS.car;
-  if (key.includes("train") || key.includes("locomotive")) return VEHICLE_COLORS.train;
-  return "#f3efe4";
-}
-
 type EquipmentCategory = "vehicle" | "implement" | "trailer";
 
 function equipmentCategory(vehicle: Vehicle): EquipmentCategory {
   if (vehicle.category === "implement" || vehicle.category === "trailer") return vehicle.category;
   return "vehicle";
-}
-
-function markerColor(vehicle: Vehicle): string {
-  const colored = vehicleArrowColor(vehicle.type);
-  if (colored !== "#f3efe4") return colored;
-  if (equipmentCategory(vehicle) === "trailer") return "#6ea8d9";
-  if (equipmentCategory(vehicle) === "implement") return "#c9a24a";
-  return colored;
 }
 
 function EquipmentGlyph({ category }: { category: EquipmentCategory }) {
@@ -389,6 +351,7 @@ function MapChrome({
   onList,
   onReset,
   onSelect,
+  colorFor,
 }: {
   showMap: boolean;
   showFields: boolean;
@@ -406,6 +369,7 @@ function MapChrome({
   onList: () => void;
   onReset: () => void;
   onSelect: (vehicle: Vehicle) => void;
+  colorFor: (vehicle: Vehicle) => string;
 }) {
   const layerOn: Record<EquipmentCategory, boolean> = {
     vehicle: showVehicles,
@@ -467,7 +431,7 @@ function MapChrome({
                             >
                               <span
                                 className="size-2 shrink-0 rounded-full"
-                                style={{ background: markerColor(item) }}
+                                style={{ background: colorFor(item) }}
                               />
                               <span className="truncate">{item.name}</span>
                             </button>
@@ -490,6 +454,8 @@ function MapChrome({
 }
 
 export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props) {
+  const { settings, mapImageUrl } = useSettings();
+  const colorFor = (vehicle: Vehicle) => machineColor(vehicle, settings.colors);
   const [hovered, setHovered] = useState<string | null>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 });
   const [showMap, setShowMap] = useState(true);
@@ -532,7 +498,10 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
     () => fields.some((f) => f.polygon && f.polygon.length >= 3),
     [fields],
   );
-  const imageBox = useMemo(() => mapImageBox(mapSize, frame), [mapSize, frame]);
+  const imageBox = useMemo(
+    () => mapImageBox(mapSize, frame, settings.mapImageFit),
+    [mapSize, frame, settings.mapImageFit],
+  );
 
   useEffect(() => {
     const viewport = viewportRef.current;
@@ -714,6 +683,7 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
       onList={() => setListOpen((open) => !open)}
       onReset={resetView}
       onSelect={onSelectVehicle}
+      colorFor={colorFor}
     />
   );
 
@@ -760,7 +730,7 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
 
         {showMap ? (
           <img
-            src="/PDA.png"
+            src={mapImageUrl ?? "/PDA.png"}
             alt=""
             draggable={false}
             className="pointer-events-none absolute max-w-none select-none"
@@ -845,7 +815,7 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
                 )}
                 style={{
                   transform: category === "implement" ? undefined : `rotate(${deg}deg)`,
-                  color: markerColor(v),
+                  color: colorFor(v),
                 }}
               >
                 <EquipmentGlyph category={category} />

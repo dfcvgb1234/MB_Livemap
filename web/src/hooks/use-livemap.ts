@@ -12,6 +12,7 @@ import type {
   CommandResult,
   ConnectionStatus,
   GameState,
+  LivemapNotification,
   StatusMessage,
   WhitelistAction,
 } from "@/lib/types";
@@ -25,16 +26,34 @@ export function useLivemap() {
   const [error, setError] = useState<string | null>(null);
   const socketRef = useRef<LivemapSocket | null>(null);
   const everConnected = useRef(false);
+  const notificationListeners = useRef(new Set<(note: LivemapNotification) => void>());
+  const [focus, setFocus] = useState<{ id: string; tick: number } | null>(null);
+
+  const subscribeNotifications = useCallback((listener: (note: LivemapNotification) => void) => {
+    notificationListeners.current.add(listener);
+    return () => {
+      notificationListeners.current.delete(listener);
+    };
+  }, []);
+
+  const focusVehicle = useCallback((id: string) => {
+    setFocus({ id, tick: Date.now() });
+  }, []);
 
   useEffect(() => {
     const socket = new LivemapSocket(defaultWsUrl(), {
       onState: (s) => {
+        everConnected.current = true;
+        setConnection("connected");
         setState(s);
         setError(null);
       },
       onAutoDrive: setAutoDrive,
       onStatus: setBridgeStatus,
       onCommandResult: setLastResult,
+      onNotification: (note) => {
+        for (const listener of notificationListeners.current) listener(note);
+      },
       onConnection: (ok) => {
         if (ok) {
           everConnected.current = true;
@@ -75,6 +94,9 @@ export function useLivemap() {
     lastResult,
     error,
     sendCommand,
+    subscribeNotifications,
+    focusVehicle,
+    focus,
     isLive: connection === "connected" && state !== null,
   };
 }

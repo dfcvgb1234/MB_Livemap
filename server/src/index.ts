@@ -17,6 +17,9 @@ import {
   type CommandMessage,
   type CommandResult,
   type GameState,
+  type LivemapNotification,
+  type NotificationKind,
+  type NotificationLevel,
   type StatusMessage,
 } from "./types.js";
 import { createMockAutoDrive, startMockInjector } from "./mock.js";
@@ -370,6 +373,25 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
   };
 }
 
+function normalizeNotification(note: Partial<LivemapNotification>): LivemapNotification {
+  const kind: NotificationKind =
+    note.kind === "arrived" || note.kind === "stuck" || note.kind === "problem" || note.kind === "info"
+      ? note.kind
+      : "info";
+  const level: NotificationLevel =
+    note.level === "info" || note.level === "warn" || note.level === "error" ? note.level : "info";
+  return {
+    type: "notification",
+    id: typeof note.id === "string" && note.id !== "" ? note.id : randomUUID(),
+    kind,
+    level,
+    text: typeof note.text === "string" ? note.text : "",
+    ...(typeof note.vehicleId === "string" ? { vehicleId: note.vehicleId } : {}),
+    ...(typeof note.vehicleName === "string" ? { vehicleName: note.vehicleName } : {}),
+    ts: typeof note.ts === "number" ? note.ts : Date.now(),
+  };
+}
+
 function handleModLine(line: string) {
   const trimmed = line.trim();
   if (!trimmed) return;
@@ -403,6 +425,12 @@ function handleModLine(line: string) {
 
   if (typed.type === "autodrive") {
     setAutoDrive(msg as AutoDriveGraph);
+    return;
+  }
+
+  if (typed.type === "notification") {
+    const note = normalizeNotification(msg as Partial<LivemapNotification>);
+    if (note.text !== "") broadcast(note);
     return;
   }
 
@@ -573,7 +601,7 @@ app.get("/state", (c) => c.json(latestState));
 app.post("/mock/start", (c) => {
   if (!mockActive) {
     mockActive = true;
-    stopMock = startMockInjector(setState, 2);
+    stopMock = startMockInjector(setState, 2, broadcast);
     setAutoDrive(createMockAutoDrive(), true);
   }
   return c.json({ mockActive: true });
@@ -593,7 +621,7 @@ serve({ fetch: app.fetch, port: HTTP_PORT, hostname: "127.0.0.1" }, () => {
 
 if (MOCK) {
   console.log("[mock] mock injector enabled");
-  stopMock = startMockInjector(setState, 2);
+  stopMock = startMockInjector(setState, 2, broadcast);
 }
 
 console.log(

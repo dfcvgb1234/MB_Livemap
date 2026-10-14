@@ -168,6 +168,21 @@ export type CommandResult = {
   error?: string;
 };
 
+export type NotificationKind = "arrived" | "stuck" | "problem" | "info";
+
+export type NotificationLevel = "info" | "warn" | "error";
+
+export type LivemapNotification = {
+  type: "notification";
+  id: string;
+  kind: NotificationKind;
+  level: NotificationLevel;
+  text: string;
+  vehicleId?: string;
+  vehicleName?: string;
+  ts: number;
+};
+
 export type StatusMessage = {
   type: "status";
   modConnected: boolean;

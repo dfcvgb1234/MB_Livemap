@@ -1,4 +1,4 @@
-import type { AutoDriveGraph, GameState } from "./types.js";
+import type { AutoDriveGraph, GameState, LivemapNotification } from "./types.js";
 
 const FRUITS = [
   "wheat",
@@ -14,6 +14,48 @@ const FRUITS = [
 function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
+
+/** True while a production line should be blocked, then clear so the alert can arm again. */
+function lineProblem(now: number, offsetMs: number) {
+  const cycle = 14000;
+  const phase = ((now + offsetMs) % cycle) / cycle;
+  return phase >= 0.2 && phase < 0.75;
+}
+
+/** Climbs through the almost-full threshold, then drops so the alert can arm again. */
+function cargoRatio(now: number, offsetMs: number) {
+  const cycle = 12000;
+  const phase = ((now + offsetMs) % cycle) / cycle;
+  if (phase < 0.75) return 0.72 + (phase / 0.75) * 0.26;
+  return 0.98 - ((phase - 0.75) / 0.25) * 0.38;
+}
+
+const MOCK_NOTIFICATIONS: Array<Omit<LivemapNotification, "id" | "ts">> = [
+  {
+    type: "notification",
+    kind: "arrived",
+    level: "info",
+    text: "Driver of Lexion 8900 has reached Silo",
+    vehicleId: "v-harvester-1",
+    vehicleName: "Lexion 8900",
+  },
+  {
+    type: "notification",
+    kind: "stuck",
+    level: "error",
+    text: "Driver of MAN TGS got stuck",
+    vehicleId: "v-truck-1",
+    vehicleName: "MAN TGS",
+  },
+  {
+    type: "notification",
+    kind: "problem",
+    level: "warn",
+    text: "Driver of Fendt 942 can't calculate a path",
+    vehicleId: "v-tractor-1",
+    vehicleName: "Fendt 942",
+  },
+];
 
 /** Deterministic-ish mock farm state that gently animates for demos. */
 export function createMockState(t = Date.now()): GameState {
@@ -62,7 +104,7 @@ export function createMockState(t = Date.now()): GameState {
       attached: ["Header 12m"],
       fills: [
         { name: "Diesel", fillLevel: 540, capacity: 800 },
-        { name: "Wheat", fillLevel: 8200, capacity: 14500 },
+        { name: "Wheat", fillLevel: Math.round(14500 * cargoRatio(t, 0)), capacity: 14500 },
       ],
       damage: 0.11,
       adCapable: true,
@@ -115,7 +157,7 @@ export function createMockState(t = Date.now()): GameState {
       speed: 0,
       engineOn: false,
       attached: [],
-      fills: [{ name: "Wheat", fillLevel: 14000, capacity: 24000 }],
+      fills: [{ name: "Wheat", fillLevel: Math.round(24000 * cargoRatio(t, 4000)), capacity: 24000 }],
       damage: 0.08,
     },
   ];
@@ -206,7 +248,7 @@ export function createMockState(t = Date.now()): GameState {
         status: "active",
         lines: [
           { name: "Butter", status: "RUNNING" },
-          { name: "Cheese", status: "MISSING_INPUTS" },
+          { name: "Cheese", status: lineProblem(t, 0) ? "MISSING_INPUTS" : "RUNNING" },
         ],
         inputs: [
           { name: "Milk", fillLevel: 6200, capacity: 10000 },
@@ -221,11 +263,18 @@ export function createMockState(t = Date.now()): GameState {
         id: "prod-grain",
         name: "Grain Mill",
         status: "active",
+        lines: [{ name: "Flour", status: lineProblem(t, 5000) ? "NO_OUTPUT_SPACE" : "RUNNING" }],
         inputs: [
           { name: "Wheat", fillLevel: 18000, capacity: 40000 },
           { name: "Barley", fillLevel: 9000, capacity: 20000 },
         ],
-        outputs: [{ name: "Flour", fillLevel: 4500, capacity: 15000 }],
+        outputs: [
+          {
+            name: "Flour",
+            fillLevel: lineProblem(t, 5000) ? 15000 : 4500,
+            capacity: 15000,
+          },
+        ],
       },
       {
         id: "prod-biogas",
@@ -319,10 +368,34 @@ export function createMockAutoDrive(): AutoDriveGraph {
 export function startMockInjector(
   onState: (state: GameState) => void,
   hz = 1,
+  onNotification?: (note: LivemapNotification) => void,
 ): () => void {
   const interval = setInterval(() => {
     onState(createMockState(Date.now()));
   }, 1000 / hz);
   onState(createMockState(Date.now()));
-  return () => clearInterval(interval);
+
+  let step = 0;
+  let noteInterval: ReturnType<typeof setInterval> | null = null;
+  const emit = () => {
+    const sample = MOCK_NOTIFICATIONS[step % MOCK_NOTIFICATIONS.length];
+    step += 1;
+    onNotification?.({
+      ...sample,
+      id: `mock-${Date.now()}-${step}`,
+      ts: Date.now(),
+    });
+  };
+  const firstNote = onNotification
+    ? setTimeout(() => {
+        emit();
+        noteInterval = setInterval(emit, 9000);
+      }, 3000)
+    : null;
+
+  return () => {
+    clearInterval(interval);
+    if (noteInterval) clearInterval(noteInterval);
+    if (firstNote) clearTimeout(firstNote);
+  };
 }

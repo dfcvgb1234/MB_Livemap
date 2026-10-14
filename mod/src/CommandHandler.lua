@@ -89,6 +89,103 @@ function CommandHandler.new()
     return setmetatable({}, CommandHandler)
 end
 
+local function localPlayer()
+    if g_localPlayer ~= nil then
+        return g_localPlayer
+    end
+    if g_currentMission ~= nil and g_currentMission.playerSystem ~= nil and g_currentMission.playerSystem.getLocalPlayer ~= nil then
+        return g_currentMission.playerSystem:getLocalPlayer()
+    end
+    return nil
+end
+
+local function ownerFarmId(vehicle)
+    local farmId = nil
+    if vehicle.getOwnerFarmId ~= nil then
+        farmId = vehicle:getOwnerFarmId()
+    end
+    if type(farmId) ~= "number" or farmId <= 0 then
+        local player = localPlayer()
+        if player ~= nil and player.getFarmId ~= nil then
+            farmId = player:getFarmId()
+        end
+    end
+    if type(farmId) == "number" and farmId > 0 then
+        return farmId
+    end
+    return nil
+end
+
+-- Vehicles the player is not sitting in are skipped by the game update.
+-- AutoDrive itself kicks onUpdate when the driver presses start; do the same here.
+local function wakeVehicle(vehicle, keepActive)
+    if keepActive ~= false then
+        vehicle.forceIsActive = true
+        if vehicle.spec_motorized ~= nil then
+            vehicle.spec_motorized.stopMotorOnLeave = false
+        end
+        if vehicle.spec_enterable ~= nil then
+            vehicle.spec_enterable.disableCharacterOnLeave = false
+        end
+    end
+    if vehicle.raiseActive ~= nil then
+        pcall(function()
+            vehicle:raiseActive()
+        end)
+    end
+    if SpecializationUtil ~= nil and SpecializationUtil.raiseEvent ~= nil then
+        pcall(function()
+            SpecializationUtil.raiseEvent(vehicle, "onUpdate", 16, false, false, false)
+        end)
+    end
+end
+
+local function claimVehicle(vehicle)
+    if vehicle.ad == nil or vehicle.ad.stateModule == nil or vehicle.ad.stateModule.setActualFarmId == nil then
+        return
+    end
+    local farmId = ownerFarmId(vehicle)
+    if farmId ~= nil then
+        vehicle.ad.stateModule:setActualFarmId(farmId)
+    end
+end
+
+local function enterVehicle(vehicle)
+    local player = localPlayer()
+    if player == nil or player.requestToEnterVehicle == nil then
+        return
+    end
+    local current = g_currentMission ~= nil and g_currentMission.controlledVehicle or nil
+    if current == vehicle then
+        return
+    end
+
+    local function requestEnter()
+        local again = localPlayer()
+        if again ~= nil and again.requestToEnterVehicle ~= nil then
+            pcall(function()
+                again:requestToEnterVehicle(vehicle)
+            end)
+        end
+    end
+
+    if current ~= nil and player.requestToLeaveVehicle ~= nil then
+        pcall(function()
+            player:requestToLeaveVehicle()
+        end)
+        if g_currentMission ~= nil and g_currentMission.addUpdateable ~= nil then
+            local tick = {}
+            function tick:update()
+                g_currentMission:removeUpdateable(self)
+                requestEnter()
+            end
+            g_currentMission:addUpdateable(tick)
+            return
+        end
+    end
+    requestEnter()
+end
+
 function CommandHandler:handle(cmd)
     if type(cmd) ~= "table" or cmd.type ~= "command" then
         return { type = "commandResult", id = cmd and cmd.id or "unknown", ok = false, error = "Invalid command" }
@@ -106,6 +203,7 @@ function CommandHandler:handle(cmd)
     end
 
     local ok, err = pcall(function()
+        claimVehicle(vehicle)
         if action == "engine.start" then
             if vehicle.startMotor ~= nil then
                 vehicle:startMotor()
@@ -230,6 +328,8 @@ function CommandHandler:handle(cmd)
                 error("detach API unavailable")
             end
         end
+        wakeVehicle(vehicle, action ~= "engine.stop" and action ~= "autodrive.stop")
+        enterVehicle(vehicle)
     end)
 
     if ok then

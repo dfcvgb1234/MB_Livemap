@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Livemap } from "@/components/livemap";
 import { WeatherStrip } from "@/components/weather-strip";
 import { CropCalendar } from "@/components/crop-calendar";
@@ -11,8 +11,16 @@ import { useLivemapContext } from "@/components/livemap-provider";
 import type { Vehicle } from "@/lib/types";
 
 export default function HomePage() {
-  const { state, connection, bridgeStatus, error, sendCommand, lastResult } = useLivemapContext();
+  const { state, connection, bridgeStatus, error, sendCommand, lastResult, focus } = useLivemapContext();
   const [selected, setSelected] = useState<Vehicle | null>(null);
+  const stateRef = useRef(state);
+  stateRef.current = state;
+
+  useEffect(() => {
+    if (!focus) return;
+    const vehicle = stateRef.current?.vehicles.find((item) => item.id === focus.id);
+    if (vehicle) setSelected(vehicle);
+  }, [focus]);
 
   const liveSelected =
     selected == null

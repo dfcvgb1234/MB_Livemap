@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Bell, Settings } from "lucide-react";
 import { LivemapProvider, useLivemapContext } from "@/components/livemap-provider";
+import { NotificationHistorySheet } from "@/components/notification-history-sheet";
+import { SettingsProvider, useSettings } from "@/components/settings-provider";
+import { SettingsSheet } from "@/components/settings-sheet";
+import { NotificationProvider, ToastStack, useNotificationCenter } from "@/components/toast-stack";
 import { cn } from "@/lib/utils";
 
 const NAV = [
@@ -17,6 +22,8 @@ function formatUpdated(ts: number | null | undefined) {
 
 function ShellInner({ children }: { children: React.ReactNode }) {
   const { state, bridgeStatus } = useLivemapContext();
+  const { setOpen } = useSettings();
+  const { history, setHistoryOpen } = useNotificationCenter();
   const pathname = usePathname();
   const vehicles = state?.vehicles.length ?? 0;
   const fields = state?.fields.length ?? 0;
@@ -59,9 +66,33 @@ function ShellInner({ children }: { children: React.ReactNode }) {
             </span>
           ) : null}
           <span className="text-[13px] text-[#b7b1a4]">{formatUpdated(state?.ts)}</span>
+          <button
+            type="button"
+            aria-label={history.length > 0 ? `Notifications, ${history.length}` : "Notifications"}
+            onClick={() => setHistoryOpen(true)}
+            className="relative grid size-10 place-items-center rounded-lg text-[#f3efe4] hover:bg-white/10"
+          >
+            <Bell className="size-5" aria-hidden />
+            {history.length > 0 ? (
+              <span className="absolute top-1 right-1 grid min-w-4 place-items-center rounded-full bg-[#e2b657] px-1 text-[10px] font-bold text-[#2a2112]">
+                {history.length > 99 ? "99+" : history.length}
+              </span>
+            ) : null}
+          </button>
+          <button
+            type="button"
+            aria-label="Settings"
+            onClick={() => setOpen(true)}
+            className="grid size-10 place-items-center rounded-lg text-[#f3efe4] hover:bg-white/10"
+          >
+            <Settings className="size-5" aria-hidden />
+          </button>
         </div>
       </header>
       <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+      <ToastStack />
+      <NotificationHistorySheet />
+      <SettingsSheet />
     </div>
   );
 }
@@ -69,7 +100,11 @@ function ShellInner({ children }: { children: React.ReactNode }) {
 export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <LivemapProvider>
-      <ShellInner>{children}</ShellInner>
+      <SettingsProvider>
+        <NotificationProvider>
+          <ShellInner>{children}</ShellInner>
+        </NotificationProvider>
+      </SettingsProvider>
     </LivemapProvider>
   );
 }

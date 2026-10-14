@@ -9,7 +9,18 @@ AutoDriveSync.__index = AutoDriveSync
 -- getfenv() of a function defined inside AutoDrive to reach that mod's environment.
 local resolvedAutoDrive = nil
 local resolvedGraph = nil
+local resolvedEnv = nil
 local loggedResolve = false
+
+local function rememberEnv(env)
+    if type(env) ~= "table" then
+        return
+    end
+    resolvedEnv = env
+    if AutoDriveNotify ~= nil and AutoDriveNotify.install ~= nil then
+        AutoDriveNotify.install(env)
+    end
+end
 
 local function looksLikeAutoDrive(spec)
     return type(spec) == "table"
@@ -20,12 +31,23 @@ end
 
 function AutoDriveSync.resolve()
     if resolvedAutoDrive ~= nil and resolvedGraph ~= nil then
+        if resolvedEnv ~= nil then
+            rememberEnv(resolvedEnv)
+        end
         return resolvedAutoDrive, resolvedGraph
     end
 
     if AutoDrive ~= nil and ADGraphManager ~= nil and ADGraphManager.getWayPoints ~= nil then
         resolvedAutoDrive = AutoDrive
         resolvedGraph = ADGraphManager
+        local env = nil
+        if getfenv ~= nil and type(AutoDrive.localize) == "function" then
+            local ok, found = pcall(getfenv, AutoDrive.localize)
+            if ok and type(found) == "table" then
+                env = found
+            end
+        end
+        rememberEnv(env or _G)
     else
         local types = g_vehicleTypeManager ~= nil and g_vehicleTypeManager.types or nil
         if type(types) == "table" then
@@ -38,6 +60,7 @@ function AutoDriveSync.resolve()
                             if ok and type(env) == "table" and env.ADGraphManager ~= nil then
                                 resolvedAutoDrive = env.AutoDrive or spec
                                 resolvedGraph = env.ADGraphManager
+                                rememberEnv(env)
                                 break
                             end
                         end
