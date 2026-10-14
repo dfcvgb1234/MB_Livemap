@@ -120,6 +120,9 @@ local function capture(autoDrive, vehicle, messageType, text, args)
     local id = vehicleId(vehicle)
     if id ~= nil then
         item.vehicleId = id
+        if kind == "arrived" and CourseplaySync ~= nil and CourseplaySync.noteArrival ~= nil then
+            CourseplaySync.noteArrival(id)
+        end
     end
     local name = vehicleName(vehicle)
     if name ~= nil then
@@ -156,6 +159,21 @@ function AutoDriveNotify.install(env)
     event.sendMessage = wrap(originalMessage)
     installed = true
     Logging.info("[MB Livemap] AutoDrive notifications hooked")
+end
+
+function AutoDriveNotify.push(item)
+    if type(item) ~= "table" or type(item.text) ~= "string" or item.text == "" then
+        return
+    end
+    if type(item.id) ~= "string" or item.id == "" then
+        nextId = nextId + 1
+        item.id = "note-" .. tostring(nextId)
+    end
+    if type(item.ts) ~= "number" then
+        item.ts = nowMs()
+    end
+    item.type = "notification"
+    enqueue(item)
 end
 
 function AutoDriveNotify.drain()

@@ -19,6 +19,7 @@ const CHANNEL_LABEL: Record<ToastChannel, string> = {
   adArrived: "Arrived",
   adStuck: "Stuck",
   adProblem: "AutoDrive",
+  cpFinished: "Courseplay",
   productionMissing: "Production",
   productionFull: "Production",
 };

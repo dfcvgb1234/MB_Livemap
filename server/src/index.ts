@@ -13,6 +13,7 @@ import {
   emptyState,
   type AutoDriveGraph,
   type AutoDriveMode,
+  type CourseplayCourses,
   type BridgeToWeb,
   type CommandMessage,
   type CommandResult,
@@ -22,7 +23,7 @@ import {
   type NotificationLevel,
   type StatusMessage,
 } from "./types.js";
-import { createMockAutoDrive, startMockInjector } from "./mock.js";
+import { createMockAutoDrive, createMockCourseplay, startMockInjector } from "./mock.js";
 
 const TCP_PORT = Number(process.env.MB_LIVEMAP_TCP_PORT ?? 18765);
 const WS_PORT = Number(process.env.MB_LIVEMAP_WS_PORT ?? 18766);
@@ -50,7 +51,11 @@ let latestState: GameState = emptyState(MOCK ? "mock" : "mod");
 let latestAutoDrive: AutoDriveGraph = MOCK
   ? createMockAutoDrive()
   : { type: "autodrive", available: false };
+let latestCourseplay: CourseplayCourses = MOCK
+  ? createMockCourseplay()
+  : { type: "courseplay", available: false };
 let autoDriveFromMock = MOCK;
+let courseplayFromMock = MOCK;
 let lastStateTs: number | null = MOCK ? Date.now() : null;
 let modSocket: Socket | null = null;
 let modViaPipe = false;
@@ -82,15 +87,20 @@ function broadcast(msg: BridgeToWeb) {
   }
 }
 
-const mockAdOverrides = new Map<
-  string,
-  {
-    adActive: boolean;
-    adDestination: string | null;
-    adSecondDestination: string | null;
-    adMode: AutoDriveMode | null;
-  }
->();
+type MockVehiclePatch = {
+  adActive?: boolean;
+  adDestination?: string | null;
+  adSecondDestination?: string | null;
+  adMode?: AutoDriveMode | null;
+  cpActive?: boolean;
+  cpCourse?: string | null;
+};
+
+const mockAdOverrides = new Map<string, MockVehiclePatch>();
+
+function patchMockVehicle(vehicleId: string, patch: MockVehiclePatch) {
+  mockAdOverrides.set(vehicleId, { ...mockAdOverrides.get(vehicleId), ...patch });
+}
 
 function applyMockAd(state: GameState): GameState {
   if (state.source !== "mock" || mockAdOverrides.size === 0) return state;
@@ -114,6 +124,12 @@ function setAutoDrive(graph: AutoDriveGraph, fromMock = false) {
   latestAutoDrive = graph;
   autoDriveFromMock = fromMock;
   broadcast(graph);
+}
+
+function setCourseplay(courses: CourseplayCourses, fromMock = false) {
+  latestCourseplay = courses;
+  courseplayFromMock = fromMock;
+  broadcast(courses);
 }
 
 function xmlAttr(value: string) {
@@ -154,7 +170,7 @@ function flushPipeCommands() {
   if (!cmd) return;
   const body =
     `<?xml version="1.0" encoding="utf-8" standalone="no"?>\n` +
-    `<commands id="${xmlAttr(cmd.id)}" action="${xmlAttr(cmd.action)}" vehicleId="${xmlAttr(cmd.vehicleId)}" targetId="${xmlAttr(cmd.targetId ?? "")}" mode="${xmlAttr(cmd.mode ?? "")}" secondTargetId="${xmlAttr(cmd.secondTargetId ?? "")}" fillType="${xmlAttr(cmd.fillType ?? "")}"/>\n`;
+    `<commands id="${xmlAttr(cmd.id)}" action="${xmlAttr(cmd.action)}" vehicleId="${xmlAttr(cmd.vehicleId)}" targetId="${xmlAttr(cmd.targetId ?? "")}" mode="${xmlAttr(cmd.mode ?? "")}" secondTargetId="${xmlAttr(cmd.secondTargetId ?? "")}" fillType="${xmlAttr(cmd.fillType ?? "")}" cpStart="${xmlAttr(cmd.cpStart ?? "")}" cpLane="${xmlAttr(cmd.cpLane == null ? "" : String(cmd.cpLane))}"/>\n`;
   const tmp = `${COMMAND_FILE}.tmp`;
   try {
     mkdirSync(SETTINGS_DIR, { recursive: true });
@@ -239,7 +255,7 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
         return result;
       }
       if (cmd.action === "autodrive.stop") {
-        mockAdOverrides.set(cmd.vehicleId, {
+        patchMockVehicle(cmd.vehicleId, {
           adActive: false,
           adDestination: null,
           adSecondDestination: null,
@@ -262,7 +278,14 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
           return result;
         }
         const mode = cmd.mode ?? "drive";
-        if (mode !== "drive" && mode !== "pickup" && mode !== "deliver" && mode !== "load" && mode !== "unload") {
+        if (
+          mode !== "drive" &&
+          mode !== "pickup" &&
+          mode !== "deliver" &&
+          mode !== "load" &&
+          mode !== "unload" &&
+          mode !== "fieldwork"
+        ) {
           const result: CommandResult = {
             type: "commandResult",
             id: cmd.id,
@@ -273,6 +296,37 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
           broadcast(result);
           return result;
         }
+        if (mode === "fieldwork") {
+          const course = latestCourseplay.courses?.find((item) => item.id === cmd.targetId);
+          if (!latestCourseplay.available || !cmd.targetId || !course) {
+            const result: CommandResult = {
+              type: "commandResult",
+              id: cmd.id,
+              ok: false,
+              error: "Unknown course",
+            };
+            replyToClient(from, result);
+            broadcast(result);
+            return result;
+          }
+          if (!vehicle.cpCapable) {
+            const result: CommandResult = {
+              type: "commandResult",
+              id: cmd.id,
+              ok: false,
+              error: "Vehicle does not support Courseplay",
+            };
+            replyToClient(from, result);
+            broadcast(result);
+            return result;
+          }
+          patchMockVehicle(cmd.vehicleId, {
+            adActive: true,
+            adDestination: `${course.folder} / ${course.name}`,
+            adSecondDestination: null,
+            adMode: "fieldwork",
+          });
+        } else {
         const markerId = Number(cmd.targetId);
         const marker = latestAutoDrive.markers?.find((item) => item.id === markerId);
         if (!cmd.targetId || !marker) {
@@ -311,17 +365,69 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
           broadcast(result);
           return result;
         }
-        mockAdOverrides.set(cmd.vehicleId, {
+        patchMockVehicle(cmd.vehicleId, {
           adActive: true,
           adDestination: marker.name,
           adSecondDestination: second?.name ?? null,
           adMode: mode,
         });
+        }
         latestState = applyMockAd({
           ...latestState,
           ts: Date.now(),
         });
       }
+      lastStateTs = latestState.ts;
+      broadcast(latestState);
+    }
+    if (cmd.action === "courseplay.start" || cmd.action === "courseplay.stop") {
+      const vehicle = latestState.vehicles.find((v) => v.id === cmd.vehicleId);
+      if (!vehicle?.cpCapable) {
+        const result: CommandResult = {
+          type: "commandResult",
+          id: cmd.id,
+          ok: false,
+          error: "Vehicle does not support Courseplay",
+        };
+        replyToClient(from, result);
+        broadcast(result);
+        return result;
+      }
+      if (cmd.action === "courseplay.stop") {
+        patchMockVehicle(cmd.vehicleId, { cpActive: false, cpCourse: null });
+      } else {
+        if (vehicle.cpActive) {
+          const result: CommandResult = {
+            type: "commandResult",
+            id: cmd.id,
+            ok: false,
+            error: "Courseplay is already running",
+          };
+          replyToClient(from, result);
+          broadcast(result);
+          return result;
+        }
+        const course = latestCourseplay.courses?.find((item) => item.id === cmd.targetId);
+        if (!latestCourseplay.available || !cmd.targetId || !course) {
+          const result: CommandResult = {
+            type: "commandResult",
+            id: cmd.id,
+            ok: false,
+            error: "Unknown course",
+          };
+          replyToClient(from, result);
+          broadcast(result);
+          return result;
+        }
+        patchMockVehicle(cmd.vehicleId, {
+          cpActive: true,
+          cpCourse: `${course.folder} / ${course.name}`,
+        });
+      }
+      latestState = applyMockAd({
+        ...latestState,
+        ts: Date.now(),
+      });
       lastStateTs = latestState.ts;
       broadcast(latestState);
     }
@@ -375,7 +481,7 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
 
 function normalizeNotification(note: Partial<LivemapNotification>): LivemapNotification {
   const kind: NotificationKind =
-    note.kind === "arrived" || note.kind === "stuck" || note.kind === "problem" || note.kind === "info"
+    note.kind === "arrived" || note.kind === "stuck" || note.kind === "problem" || note.kind === "info" || note.kind === "finished"
       ? note.kind
       : "info";
   const level: NotificationLevel =
@@ -417,6 +523,9 @@ function handleModLine(line: string) {
       if (autoDriveFromMock) {
         setAutoDrive({ type: "autodrive", available: false });
       }
+      if (courseplayFromMock) {
+        setCourseplay({ type: "courseplay", available: false });
+      }
       mockAdOverrides.clear();
     }
     setState(state);
@@ -425,6 +534,11 @@ function handleModLine(line: string) {
 
   if (typed.type === "autodrive") {
     setAutoDrive(msg as AutoDriveGraph);
+    return;
+  }
+
+  if (typed.type === "courseplay") {
+    setCourseplay(msg as CourseplayCourses);
     return;
   }
 
@@ -494,8 +608,8 @@ const tcpServer = createTcpServer((socket) => {
   attachModSocket(socket, false);
 });
 
-tcpServer.listen(TCP_PORT, "127.0.0.1", () => {
-  console.log(`[tcp] listening on 127.0.0.1:${TCP_PORT}`);
+tcpServer.listen(TCP_PORT, "0.0.0.0", () => {
+  console.log(`[tcp] listening on 0.0.0.0:${TCP_PORT}`);
 });
 
 // FS25 cannot load LuaSocket. The mod writes JSON lines to this pipe instead.
@@ -538,6 +652,7 @@ wss.on("connection", (ws, req) => {
   ws.send(JSON.stringify(statusPayload()));
   ws.send(JSON.stringify(latestState));
   ws.send(JSON.stringify(latestAutoDrive));
+  ws.send(JSON.stringify(latestCourseplay));
 
   ws.on("message", (data) => {
     let msg: unknown;
@@ -576,8 +691,8 @@ wss.on("connection", (ws, req) => {
   });
 });
 
-wsHttp.listen(WS_PORT, "127.0.0.1", () => {
-  console.log(`[ws] listening on 127.0.0.1:${WS_PORT}`);
+wsHttp.listen(WS_PORT, "0.0.0.0", () => {
+  console.log(`[ws] listening on 0.0.0.0:${WS_PORT}`);
 });
 
 // --- HTTP health / control ---
@@ -603,6 +718,7 @@ app.post("/mock/start", (c) => {
     mockActive = true;
     stopMock = startMockInjector(setState, 2, broadcast);
     setAutoDrive(createMockAutoDrive(), true);
+    setCourseplay(createMockCourseplay(), true);
   }
   return c.json({ mockActive: true });
 });
@@ -615,8 +731,8 @@ app.post("/mock/stop", (c) => {
   return c.json({ mockActive: false });
 });
 
-serve({ fetch: app.fetch, port: HTTP_PORT, hostname: "127.0.0.1" }, () => {
-  console.log(`[http] health on http://127.0.0.1:${HTTP_PORT}/health`);
+serve({ fetch: app.fetch, port: HTTP_PORT, hostname: "0.0.0.0" }, () => {
+  console.log(`[http] health on http://0.0.0.0:${HTTP_PORT}/health`);
 });
 
 if (MOCK) {

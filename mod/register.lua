@@ -9,6 +9,7 @@ source(modDirectory .. "src/TcpClient.lua")
 source(modDirectory .. "src/StateCollector.lua")
 source(modDirectory .. "src/AutoDriveNotify.lua")
 source(modDirectory .. "src/AutoDriveSync.lua")
+source(modDirectory .. "src/CourseplaySync.lua")
 source(modDirectory .. "src/CommandHandler.lua")
 source(modDirectory .. "src/LivemapBridge.lua")
 

@@ -1,8 +1,10 @@
 import type {
   AutoDriveGraph,
   AutoDriveMode,
+  CourseplayCourses,
   CommandMessage,
   CommandResult,
+  CourseplayStart,
   GameState,
   LivemapNotification,
   StatusMessage,
@@ -13,6 +15,8 @@ export function defaultWsUrl() {
   if (typeof window === "undefined") return "ws://127.0.0.1:18766";
   const fromEnv = process.env.NEXT_PUBLIC_WS_URL;
   if (fromEnv) return fromEnv;
+  // Follow the page address, so an iPad that opened the LAN IP also
+  // connects the live socket to that same PC.
   const host = window.location.hostname || "127.0.0.1";
   return `ws://${host}:18766`;
 }
@@ -21,7 +25,13 @@ export function createCommand(
   action: WhitelistAction,
   vehicleId: string,
   targetId?: string,
-  extra?: { mode?: AutoDriveMode; secondTargetId?: string; fillType?: string },
+  extra?: {
+    mode?: AutoDriveMode;
+    secondTargetId?: string;
+    fillType?: string;
+    cpStart?: CourseplayStart;
+    cpLane?: number;
+  },
 ): CommandMessage {
   return {
     type: "command",
@@ -35,12 +45,15 @@ export function createCommand(
     ...(extra?.mode ? { mode: extra.mode } : {}),
     ...(extra?.secondTargetId ? { secondTargetId: extra.secondTargetId } : {}),
     ...(extra?.fillType ? { fillType: extra.fillType } : {}),
+    ...(extra?.cpStart ? { cpStart: extra.cpStart } : {}),
+    ...(extra?.cpLane != null ? { cpLane: extra.cpLane } : {}),
   };
 }
 
 export type WsHandlers = {
   onState?: (state: GameState) => void;
   onAutoDrive?: (graph: AutoDriveGraph) => void;
+  onCourseplay?: (courses: CourseplayCourses) => void;
   onStatus?: (status: StatusMessage) => void;
   onCommandResult?: (result: CommandResult) => void;
   onNotification?: (note: LivemapNotification) => void;
@@ -100,6 +113,8 @@ export class LivemapSocket {
       if (typed.type === "state") this.handlers.onState?.(msg as GameState);
       else if (typed.type === "autodrive")
         this.handlers.onAutoDrive?.(msg as AutoDriveGraph);
+      else if (typed.type === "courseplay")
+        this.handlers.onCourseplay?.(msg as CourseplayCourses);
       else if (typed.type === "status")
         this.handlers.onStatus?.(msg as StatusMessage);
       else if (typed.type === "commandResult")

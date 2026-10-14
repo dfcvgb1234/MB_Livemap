@@ -1,16 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Livemap } from "@/components/livemap";
+import { Livemap, MapSlot } from "@/components/livemap";
 import { VehicleSheet } from "@/components/vehicle-sheet";
+import { CourseplayCard } from "@/components/courseplay-card";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { useLivemapContext } from "@/components/livemap-provider";
-import type { Vehicle } from "@/lib/types";
+import { courseLanes, defaultCourseLane } from "@/lib/course-lanes";
+import type { CourseplayStart, Vehicle } from "@/lib/types";
 
 export function AutoDrivePage({ initialVehicleId }: { initialVehicleId: string | null }) {
-  const { state, autoDrive, connection, bridgeStatus, error, sendCommand, lastResult } =
+  const { state, autoDrive, courseplay, connection, bridgeStatus, error, sendCommand, lastResult } =
     useLivemapContext();
   const [selected, setSelected] = useState<Vehicle | null>(null);
+  const [courseId, setCourseId] = useState("");
+  const [lane, setLane] = useState(0);
+  const [startAt, setStartAt] = useState<CourseplayStart>("first");
   const appliedVehicle = useRef<string | null>(null);
 
   const liveSelected =
@@ -29,18 +34,42 @@ export function AutoDrivePage({ initialVehicleId }: { initialVehicleId: string |
   const networkReady = autoDrive?.available === true;
   const markerCount = autoDrive?.markers?.length ?? 0;
   const waypointCount = autoDrive?.waypoints?.length ?? 0;
+  const courses = courseplay?.courses ?? [];
+  const courseplayReady = courseplay?.available === true;
+  const courseKey = courses.map((course) => course.id).join("\n");
+  const selectedCourse = courses.find((course) => course.id === courseId) ?? null;
+  const lanes = courseLanes(selectedCourse?.vehicles);
+  const laneKey = lanes.map((item) => item.value).join(",");
+  const activeLane = lanes.some((item) => item.value === lane) ? lane : defaultCourseLane(lanes);
+
+  useEffect(() => {
+    if (courseId === "" || courseKey.split("\n").includes(courseId)) return;
+    setCourseId("");
+  }, [courseId, courseKey]);
+
+  useEffect(() => {
+    if (laneKey === "") return;
+    const values = laneKey.split(",").map(Number);
+    setLane((current) =>
+      values.includes(current) ? current : defaultCourseLane(values.map((value) => ({ value, label: "" }))),
+    );
+  }, [laneKey]);
 
   return (
-    <div className="grid min-h-full grid-cols-1 min-[1200px]:h-full min-[1200px]:min-h-0 min-[1200px]:grid-cols-[minmax(0,1fr)_minmax(520px,38vw)] min-[1200px]:overflow-hidden">
-      <section className="relative h-[68dvh] min-w-0 bg-[#100e0b] min-[1200px]:h-full">
+    <div className="grid min-h-full grid-cols-1 min-[1536px]:h-full min-[1536px]:min-h-0 min-[1536px]:grid-cols-[minmax(0,1fr)_minmax(520px,38vw)] min-[1536px]:overflow-hidden">
+      <MapSlot
+        vehicles={state?.vehicles ?? []}
+        selectedId={liveSelected?.id}
+        onSelect={setSelected}
+      >
         <Livemap
           state={state}
           autoDrive={autoDrive}
           selectedId={liveSelected?.id}
           onSelectVehicle={setSelected}
         />
-      </section>
-      <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1200px]:overflow-auto min-[1200px]:border-t-0 min-[1200px]:border-l">
+      </MapSlot>
+      <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1536px]:overflow-auto min-[1536px]:border-t-0 min-[1536px]:border-l">
         <ConnectionBanner connection={connection} bridgeStatus={bridgeStatus} error={error} />
         <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5">
           <h2 className="text-[15px] font-semibold tracking-[0.04em] uppercase">AutoDrive</h2>
@@ -55,10 +84,27 @@ export function AutoDrivePage({ initialVehicleId }: { initialVehicleId: string |
             </p>
           ) : null}
         </section>
+        <CourseplayCard
+          available={courseplayReady}
+          courses={courses}
+          vehicle={liveSelected}
+          courseId={courseId}
+          lane={activeLane}
+          startAt={startAt}
+          onCourseId={setCourseId}
+          onLane={setLane}
+          onStartAt={setStartAt}
+          onCommand={sendCommand}
+          lastResult={lastResult}
+        />
         <VehicleSheet
           embedded
           mode="autodrive"
           markers={autoDrive?.markers ?? []}
+          courseplayAvailable={networkReady && courseplayReady}
+          courseId={courseId}
+          cpLane={lanes.length > 0 ? activeLane : undefined}
+          cpStart={startAt}
           vehicle={liveSelected}
           open={false}
           onOpenChange={() => {}}

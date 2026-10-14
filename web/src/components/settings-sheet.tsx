@@ -198,6 +198,7 @@ export function SettingsSheet() {
                   adArrived: "AutoDrive arrived",
                   adStuck: "AutoDrive stuck",
                   adProblem: "AutoDrive problems",
+                  cpFinished: "Courseplay finished",
                   productionMissing: "Production needs inputs",
                   productionFull: "Production storage full",
                 }[channel];

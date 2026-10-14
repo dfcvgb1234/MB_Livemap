@@ -21,6 +21,10 @@ export type Vehicle = {
   adSecondDestination?: string | null;
   adMode?: AutoDriveMode | null;
   adFillTypes?: AutoDriveFillType[];
+  /** Present when the vehicle has a Courseplay specialization. */
+  cpCapable?: boolean;
+  cpActive?: boolean;
+  cpCourse?: string | null;
 };
 
 export type WeatherPoint = {
@@ -93,12 +97,22 @@ export type AnimalHusbandry = {
   z: number | null;
 };
 
+export type GameCalendar = {
+  /** In-game month, 1–12. */
+  period: number;
+  /** Day within that month, starting at 1. */
+  day: number;
+  daysPerPeriod: number;
+};
+
 export type GameState = {
   type: "state";
   ts: number;
   source: "mod" | "mock";
   mapName: string | null;
   mapSize: number | null;
+  /** In-game date. Null until the mod sends one. */
+  calendar: GameCalendar | null;
   vehicles: Vehicle[];
   weather: Weather;
   fields: Field[];
@@ -118,7 +132,25 @@ export type AutoDriveFillType = {
   name: string;
 };
 
-export type AutoDriveMode = "drive" | "pickup" | "deliver" | "load" | "unload";
+export type AutoDriveMode = "drive" | "pickup" | "deliver" | "load" | "unload" | "fieldwork";
+
+export type CourseplayStart = "first" | "nearest" | "last";
+
+export type CourseplayCourse = {
+  /** Full path of the saved course. This is the id used to start it. */
+  id: string;
+  name: string;
+  folder: string;
+  /** Vehicles this course was generated for, from 1 to 5. */
+  vehicles?: number;
+};
+
+export type CourseplayCourses = {
+  type: "courseplay";
+  available: boolean;
+  revision?: number;
+  courses?: CourseplayCourse[];
+};
 
 export type AutoDriveMarker = {
   /** AutoDrive marker index. This is the destination id used to start a drive. */
@@ -142,7 +174,9 @@ export type WhitelistAction =
   | "attach"
   | "detach"
   | "autodrive.start"
-  | "autodrive.stop";
+  | "autodrive.stop"
+  | "courseplay.start"
+  | "courseplay.stop";
 
 export type CommandMessage = {
   type: "command";
@@ -153,6 +187,10 @@ export type CommandMessage = {
   mode?: AutoDriveMode;
   secondTargetId?: string;
   fillType?: string;
+  /** Courseplay start point. Defaults to the first waypoint. */
+  cpStart?: CourseplayStart;
+  /** Courseplay lane. Negative is left, positive is right, 0 is the middle. */
+  cpLane?: number;
 };
 
 export type CommandResult = {
@@ -162,7 +200,7 @@ export type CommandResult = {
   error?: string;
 };
 
-export type NotificationKind = "arrived" | "stuck" | "problem" | "info";
+export type NotificationKind = "arrived" | "stuck" | "problem" | "info" | "finished";
 
 export type NotificationLevel = "info" | "warn" | "error";
 
@@ -193,6 +231,7 @@ export type StatusMessage = {
 export type BridgeToWeb =
   | GameState
   | AutoDriveGraph
+  | CourseplayCourses
   | CommandResult
   | StatusMessage
   | LivemapNotification
@@ -205,6 +244,8 @@ export const WHITELIST: ReadonlySet<string> = new Set([
   "detach",
   "autodrive.start",
   "autodrive.stop",
+  "courseplay.start",
+  "courseplay.stop",
 ]);
 
 export function emptyState(source: "mod" | "mock" = "mock"): GameState {
@@ -214,6 +255,7 @@ export function emptyState(source: "mod" | "mock" = "mock"): GameState {
     source,
     mapName: null,
     mapSize: 2048,
+    calendar: null,
     vehicles: [],
     weather: { condition: null, temperatureC: null, hourly: null, daily: null },
     fields: [],

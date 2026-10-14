@@ -10,6 +10,8 @@ local ALLOWED = {
     ["detach"] = true,
     ["autodrive.start"] = true,
     ["autodrive.stop"] = true,
+    ["courseplay.start"] = true,
+    ["courseplay.stop"] = true,
 }
 
 local FILL_NAME_CANDIDATES = {
@@ -247,6 +249,12 @@ function CommandHandler:handle(cmd)
             if modeName == nil or modeName == "" then
                 modeName = "drive"
             end
+            if modeName == "fieldwork" then
+                if CourseplaySync == nil or CourseplaySync.startFieldwork == nil then
+                    error("Courseplay is not loaded")
+                end
+                CourseplaySync.startFieldwork(vehicle, cmd.targetId, tonumber(cmd.cpLane), cmd.cpStart)
+            else
             local modeNumber = nil
             local needsSecond = false
             local needsFill = false
@@ -309,11 +317,29 @@ function CommandHandler:handle(cmd)
             if vehicle.ad.stateModule.isActive ~= nil and not vehicle.ad.stateModule:isActive() then
                 error("AutoDrive did not start")
             end
+            end
         elseif action == "autodrive.stop" then
+            if CourseplaySync ~= nil and CourseplaySync.cancelHandoff ~= nil then
+                local stopId = vehicle.id
+                if stopId == nil and vehicle.rootNode ~= nil then
+                    stopId = vehicle.rootNode
+                end
+                CourseplaySync.cancelHandoff(stopId)
+            end
             if vehicle.stopAutoDrive == nil then
                 error("AutoDrive is not available on this vehicle")
             end
             vehicle:stopAutoDrive()
+        elseif action == "courseplay.start" then
+            if CourseplaySync == nil or CourseplaySync.startCourse == nil then
+                error("Courseplay is not loaded")
+            end
+            CourseplaySync.startCourse(vehicle, cmd.targetId, cmd.cpStart, tonumber(cmd.cpLane))
+        elseif action == "courseplay.stop" then
+            if CourseplaySync == nil or CourseplaySync.stop == nil then
+                error("Courseplay is not loaded")
+            end
+            CourseplaySync.stop(vehicle)
         elseif action == "detach" then
             if vehicle.detachImplement ~= nil then
                 -- Detach first implement when index API is present.
@@ -328,7 +354,7 @@ function CommandHandler:handle(cmd)
                 error("detach API unavailable")
             end
         end
-        wakeVehicle(vehicle, action ~= "engine.stop" and action ~= "autodrive.stop")
+        wakeVehicle(vehicle, action ~= "engine.stop" and action ~= "autodrive.stop" and action ~= "courseplay.stop")
         enterVehicle(vehicle)
     end)
 

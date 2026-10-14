@@ -29,7 +29,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   const fields = state?.fields.length ?? 0;
 
   return (
-    <div className="flex h-dvh flex-col bg-[radial-gradient(circle_at_top_left,rgba(226,182,87,0.08),transparent_28%),#17140f] text-[#f3efe4]">
+    <div className="flex h-svh flex-col bg-[radial-gradient(circle_at_top_left,rgba(226,182,87,0.08),transparent_28%),#17140f] text-[#f3efe4]">
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-[18px] py-3.5">
         <div className="flex min-w-0 items-center gap-3">
           <span className="grid size-[42px] shrink-0 place-items-center rounded-lg bg-[#e2b657] text-base font-bold text-[#2a2112]">
@@ -89,7 +89,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+      <div className="min-h-0 flex-1 overflow-auto [container-type:size] [overflow-anchor:none]">{children}</div>
       <ToastStack />
       <NotificationHistorySheet />
       <SettingsSheet />

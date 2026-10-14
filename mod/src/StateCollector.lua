@@ -861,6 +861,30 @@ function StateCollector:collectVehicles()
                         entry.adFillTypes = adState.fillTypes
                     end
                 end
+                local cpState = safeCall(function()
+                    if vehicle.appendLoadedCpCourse == nil and vehicle.getIsCpActive == nil then
+                        return nil
+                    end
+                    local active = false
+                    if vehicle.getIsCpActive ~= nil then
+                        active = vehicle:getIsCpActive() == true
+                    end
+                    local course = nil
+                    if vehicle.hasCpCourse ~= nil and vehicle:hasCpCourse() and vehicle.getCurrentCpCourseName ~= nil then
+                        course = vehicle:getCurrentCpCourseName()
+                    end
+                    return {
+                        active = active,
+                        course = course,
+                    }
+                end, nil)
+                if cpState ~= nil then
+                    entry.cpCapable = true
+                    entry.cpActive = cpState.active and true or false
+                    if type(cpState.course) == "string" and cpState.course ~= "" then
+                        entry.cpCourse = cpState.course
+                    end
+                end
                 vehicles[#vehicles + 1] = entry
             end
         end
@@ -1755,6 +1779,29 @@ function StateCollector:refreshSlow()
     end, nil)
 end
 
+function StateCollector:collectCalendar()
+    return safeCall(function()
+        local env = g_currentMission and g_currentMission.environment
+        if env == nil or env.currentPeriod == nil or env.currentDayInPeriod == nil then
+            return nil
+        end
+        local period = tonumber(env.currentPeriod)
+        local day = tonumber(env.currentDayInPeriod)
+        if period == nil or day == nil then
+            return nil
+        end
+        local days = tonumber(env.daysPerPeriod) or 1
+        if days < 1 then
+            days = 1
+        end
+        return {
+            period = math.floor(period),
+            day = math.floor(day),
+            daysPerPeriod = math.floor(days),
+        }
+    end, nil)
+end
+
 function StateCollector:buildSnapshot()
     return {
         type = "state",
@@ -1762,6 +1809,7 @@ function StateCollector:buildSnapshot()
         source = "mod",
         mapName = self.mapName,
         mapSize = self.mapSize,
+        calendar = self:collectCalendar(),
         vehicles = self:collectVehicles(),
         weather = self.cachedWeather,
         fields = self.cachedFields,

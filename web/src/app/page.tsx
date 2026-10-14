@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Livemap } from "@/components/livemap";
+import { Livemap, MapSlot } from "@/components/livemap";
 import { WeatherStrip } from "@/components/weather-strip";
 import { CropCalendar } from "@/components/crop-calendar";
 import { AnimalCards, ProductionCards } from "@/components/farm-cards";
@@ -28,15 +28,19 @@ export default function HomePage() {
       : (state?.vehicles.find((vehicle) => vehicle.id === selected.id) ?? selected);
 
   return (
-    <div className="grid min-h-full grid-cols-1 min-[1200px]:h-full min-[1200px]:min-h-0 min-[1200px]:grid-cols-[minmax(0,1fr)_minmax(520px,38vw)] min-[1200px]:overflow-hidden">
-      <section className="relative h-[68dvh] min-w-0 bg-[#100e0b] min-[1200px]:h-full">
+    <div className="grid min-h-full grid-cols-1 min-[1536px]:h-full min-[1536px]:min-h-0 min-[1536px]:grid-cols-[minmax(0,1fr)_minmax(520px,38vw)] min-[1536px]:overflow-hidden">
+      <MapSlot
+        vehicles={state?.vehicles ?? []}
+        selectedId={liveSelected?.id}
+        onSelect={setSelected}
+      >
         <Livemap
           state={state}
           selectedId={liveSelected?.id}
           onSelectVehicle={setSelected}
         />
-      </section>
-      <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1200px]:overflow-auto min-[1200px]:border-t-0 min-[1200px]:border-l">
+      </MapSlot>
+      <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1536px]:overflow-auto min-[1536px]:border-t-0 min-[1536px]:border-l">
         <ConnectionBanner connection={connection} bridgeStatus={bridgeStatus} error={error} />
         <VehicleSheet
           embedded
@@ -47,7 +51,7 @@ export default function HomePage() {
           lastResult={lastResult}
         />
         <WeatherStrip weather={state?.weather ?? null} />
-        <CropCalendar fields={state?.fields ?? []} />
+        <CropCalendar fields={state?.fields ?? []} calendar={state?.calendar ?? null} />
         <ProductionCards productions={state?.productions ?? []} />
         <AnimalCards animals={state?.animals ?? []} />
       </aside>

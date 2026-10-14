@@ -1,4 +1,4 @@
-import type { AutoDriveGraph, GameState, LivemapNotification } from "./types.js";
+import type { AutoDriveGraph, CourseplayCourses, GameState, LivemapNotification } from "./types.js";
 
 const FRUITS = [
   "wheat",
@@ -85,6 +85,8 @@ export function createMockState(t = Date.now()): GameState {
       damage: 0.04,
       adCapable: true,
       adActive: false,
+      cpCapable: true,
+      cpActive: false,
       adFillTypes: [
         { id: "1", name: "Wheat" },
         { id: "2", name: "Barley" },
@@ -111,6 +113,8 @@ export function createMockState(t = Date.now()): GameState {
       adActive: true,
       adDestination: "Silo",
       adMode: "drive" as const,
+      cpCapable: true,
+      cpActive: false,
     },
     {
       id: "v-truck-1",
@@ -127,6 +131,8 @@ export function createMockState(t = Date.now()): GameState {
       damage: 0,
       adCapable: true,
       adActive: false,
+      cpCapable: true,
+      cpActive: false,
       adFillTypes: [
         { id: "1", name: "Wheat" },
         { id: "3", name: "Corn" },
@@ -233,6 +239,11 @@ export function createMockState(t = Date.now()): GameState {
     source: "mock",
     mapName: "Riverbend Mock",
     mapSize,
+    calendar: {
+      period: (Math.floor(t / 24000) % 12) + 1,
+      day: (Math.floor(t / 8000) % 3) + 1,
+      daysPerPeriod: 3,
+    },
     vehicles,
     weather: {
       condition,
@@ -361,6 +372,20 @@ export function createMockAutoDrive(): AutoDriveGraph {
       { id: 1, name: "Farm", x: -200, z: -80 },
       { id: 2, name: "Shop", x: 360, z: 80 },
       { id: 3, name: "Silo", x: -80, z: 320 },
+    ],
+  };
+}
+
+/** Saved courses so the Courseplay card can be checked without the game. */
+export function createMockCourseplay(): CourseplayCourses {
+  return {
+    type: "courseplay",
+    available: true,
+    revision: 1,
+    courses: [
+      { id: "field-12-cultivate", name: "Cultivate", folder: "Field 12", vehicles: 5 },
+      { id: "field-12-harvest", name: "Harvest", folder: "Field 12", vehicles: 2 },
+      { id: "field-3-seed", name: "Seed", folder: "Field 3", vehicles: 1 },
     ],
   };
 }

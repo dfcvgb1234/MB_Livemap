@@ -42,6 +42,12 @@ if not exist "web\node_modules\" (
   popd
 )
 
+netsh advfirewall firewall show rule name="MB Livemap Dashboard" | findstr /C:"MB Livemap Dashboard" >nul
+if errorlevel 1 (
+  echo Allowing the iPad through Windows Firewall. Accept the prompt.
+  powershell -NoProfile -Command "Start-Process -FilePath '%~dp0AllowLanFirewall.bat' -Verb RunAs -Wait"
+)
+
 curl.exe -sf -o nul --max-time 2 http://127.0.0.1:18767/health >nul 2>&1
 if errorlevel 1 (
   echo Starting the bridge...
@@ -71,7 +77,11 @@ goto wait_web
 :open_browser
 start "" "http://127.0.0.1:43127"
 echo.
-echo Dashboard: http://127.0.0.1:43127
+echo On this PC:  http://127.0.0.1:43127
+echo On your iPad, same Wi-Fi, open:
+powershell -NoProfile -Command "Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.IPAddress -notlike '127.*' -and $_.PrefixOrigin -ne 'WellKnown' -and $_.InterfaceAlias -notmatch 'WSL|Nord|VPN|vEthernet|Hyper-V|Virtual' } | ForEach-Object { '  http://' + $_.IPAddress + ':43127' }"
+echo.
 echo Leave the Bridge and Web windows open while you play.
+echo If the iPad cannot connect, allow the MB Livemap firewall rules for Private networks.
 echo.
 pause

@@ -9,6 +9,8 @@ import {
 import type {
   AutoDriveGraph,
   AutoDriveMode,
+  CourseplayCourses,
+  CourseplayStart,
   CommandResult,
   ConnectionStatus,
   GameState,
@@ -20,6 +22,7 @@ import type {
 export function useLivemap() {
   const [state, setState] = useState<GameState | null>(null);
   const [autoDrive, setAutoDrive] = useState<AutoDriveGraph | null>(null);
+  const [courseplay, setCourseplay] = useState<CourseplayCourses | null>(null);
   const [bridgeStatus, setBridgeStatus] = useState<StatusMessage | null>(null);
   const [connection, setConnection] = useState<ConnectionStatus>("connecting");
   const [lastResult, setLastResult] = useState<CommandResult | null>(null);
@@ -49,6 +52,7 @@ export function useLivemap() {
         setError(null);
       },
       onAutoDrive: setAutoDrive,
+      onCourseplay: setCourseplay,
       onStatus: setBridgeStatus,
       onCommandResult: setLastResult,
       onNotification: (note) => {
@@ -74,7 +78,13 @@ export function useLivemap() {
       action: WhitelistAction,
       vehicleId: string,
       targetId?: string,
-      extra?: { mode?: AutoDriveMode; secondTargetId?: string; fillType?: string },
+      extra?: {
+        mode?: AutoDriveMode;
+        secondTargetId?: string;
+        fillType?: string;
+        cpStart?: CourseplayStart;
+        cpLane?: number;
+      },
     ) => {
       const cmd = createCommand(action, vehicleId, targetId, extra);
       const ok = socketRef.current?.sendCommand(cmd) ?? false;
@@ -89,6 +99,7 @@ export function useLivemap() {
   return {
     state,
     autoDrive,
+    courseplay,
     bridgeStatus,
     connection,
     lastResult,

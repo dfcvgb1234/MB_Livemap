@@ -19,6 +19,7 @@ const CHANNELS = new Set<ToastChannel>([
   "adArrived",
   "adStuck",
   "adProblem",
+  "cpFinished",
   "productionMissing",
   "productionFull",
 ]);

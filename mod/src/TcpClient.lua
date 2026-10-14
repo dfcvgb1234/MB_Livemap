@@ -6,7 +6,7 @@
 TcpClient = {}
 TcpClient.__index = TcpClient
 
-local HOST = "127.0.0.1"
+local HOST = "0.0.0.0"
 local PORT = 18765
 local PIPE_PATH = "\\\\.\\pipe\\mb-livemap"
 local RECONNECT_INTERVAL_MS = 3000
@@ -230,6 +230,8 @@ function TcpClient:pollCommand()
         local mode = xmlFile:getString("commands#mode")
         local secondTargetId = xmlFile:getString("commands#secondTargetId")
         local fillType = xmlFile:getString("commands#fillType")
+        local cpStart = xmlFile:getString("commands#cpStart")
+        local cpLane = xmlFile:getString("commands#cpLane")
         if idStr ~= nil and idStr ~= "" and idStr ~= self.lastCommandId and action ~= nil and vehicleId ~= nil then
             self.lastCommandId = idStr
             payload = {
@@ -249,6 +251,12 @@ function TcpClient:pollCommand()
             end
             if fillType ~= nil and fillType ~= "" then
                 payload.fillType = fillType
+            end
+            if cpStart ~= nil and cpStart ~= "" then
+                payload.cpStart = cpStart
+            end
+            if cpLane ~= nil and cpLane ~= "" then
+                payload.cpLane = cpLane
             end
         end
     end)

@@ -1,27 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { CROP_CALENDAR, MONTHS, calendarKey } from "@/lib/crop-calendar";
-import type { Field } from "@/lib/types";
+import { useEffect, useRef, useState } from "react";
+import { CROP_CALENDAR, MONTH_NAMES, MONTHS, calendarKey } from "@/lib/crop-calendar";
+import type { Field, GameCalendar } from "@/lib/types";
 
 type Props = {
   fields: Field[];
+  calendar: GameCalendar | null;
 };
 
-function subscribe() {
-  return () => {};
-}
-
-function getMonth() {
-  return new Date().getMonth() + 1;
-}
-
-function getServerMonth() {
-  return 1;
-}
-
-export function CropCalendar({ fields }: Props) {
-  const month = useSyncExternalStore(subscribe, getMonth, getServerMonth);
+export function CropCalendar({ fields, calendar }: Props) {
   const frameRef = useRef<HTMLDivElement>(null);
   const [markerLeft, setMarkerLeft] = useState<number | null>(null);
   const present = new Set(
@@ -29,24 +17,36 @@ export function CropCalendar({ fields }: Props) {
       .map((f) => calendarKey(f.fruitType))
       .filter((key): key is string => key != null),
   );
+  const month =
+    calendar != null && calendar.period >= 1 && calendar.period <= 12
+      ? Math.round(calendar.period)
+      : null;
+  const days = calendar != null ? Math.max(1, Math.round(calendar.daysPerPeriod)) : 1;
+  const day = calendar != null ? Math.min(days, Math.max(1, Math.round(calendar.day))) : 1;
+  const dayFraction = (day - 0.5) / days;
 
   useEffect(() => {
     const frame = frameRef.current;
-    if (!frame) return;
+    if (!frame || month == null) {
+      setMarkerLeft(null);
+      return;
+    }
     const headers = frame.querySelectorAll("th");
     const cropWidth = headers[0]?.getBoundingClientRect().width ?? 0;
     let monthsWidth = 0;
     for (let index = 1; index < headers.length; index += 1) {
       monthsWidth += headers[index].getBoundingClientRect().width;
     }
-    const fraction = (month - 0.5) / 12;
+    const fraction = (month - 1 + dayFraction) / 12;
     setMarkerLeft(cropWidth + fraction * monthsWidth);
-  }, [month, fields.length]);
+  }, [month, dayFraction, fields.length]);
 
   return (
     <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
       <h2 className="text-[15px] font-semibold tracking-[0.04em] uppercase">Crop calendar</h2>
-      <p className="mt-1 text-[13px] text-[#b7b1a4]">Month {month}</p>
+      <p className="mt-1 text-[13px] text-[#b7b1a4]">
+        {month == null ? "Waiting for the in-game date" : `${MONTH_NAMES[month - 1]} · day ${day}`}
+      </p>
       <div className="mt-2.5 flex flex-wrap gap-x-3.5 gap-y-2 text-xs text-[#b7b1a4]">
         <span className="inline-flex items-center gap-1.5">
           <i className="size-3.5 rounded-[3px] bg-[#8fb56a]/85" /> Plant
@@ -67,7 +67,10 @@ export function CropCalendar({ fields }: Props) {
                   Crop
                 </th>
                 {MONTHS.map((name, index) => (
-                  <th key={`${name}-${index}`} className="px-1.5 py-1 text-center">
+                  <th
+                    key={`${name}-${index}`}
+                    className={`px-1.5 py-1 text-center ${month === index + 1 ? "text-[#e2b657]" : ""}`}
+                  >
                     {name}
                   </th>
                 ))}

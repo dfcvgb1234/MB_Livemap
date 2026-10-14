@@ -30,6 +30,7 @@ const NotificationContext = createContext<NotificationContextValue | null>(null)
 function adChannel(note: LivemapNotification): ToastItem["channel"] {
   if (note.kind === "arrived") return "adArrived";
   if (note.kind === "stuck") return "adStuck";
+  if (note.kind === "finished") return "cpFinished";
   return "adProblem";
 }
 

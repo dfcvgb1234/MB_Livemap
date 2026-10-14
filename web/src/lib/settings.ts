@@ -8,6 +8,7 @@ export type NotificationChannel =
   | "adArrived"
   | "adStuck"
   | "adProblem"
+  | "cpFinished"
   | "productionMissing"
   | "productionFull";
 
@@ -17,6 +18,7 @@ export const NOTIFICATION_CHANNELS: NotificationChannel[] = [
   "adArrived",
   "adStuck",
   "adProblem",
+  "cpFinished",
   "productionMissing",
   "productionFull",
 ];
@@ -27,6 +29,7 @@ export type NotificationSettings = {
   adArrived: boolean;
   adStuck: boolean;
   adProblem: boolean;
+  cpFinished: boolean;
   productionMissing: boolean;
   productionFull: boolean;
   /** When true, that alert stays on screen until it is closed. */
@@ -46,6 +49,7 @@ export const DEFAULT_MANUAL_DISMISS: Record<NotificationChannel, boolean> = {
   adArrived: true,
   adStuck: true,
   adProblem: true,
+  cpFinished: true,
   productionMissing: true,
   productionFull: true,
 };
@@ -56,6 +60,7 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   adArrived: true,
   adStuck: true,
   adProblem: true,
+  cpFinished: true,
   productionMissing: true,
   productionFull: true,
   manualDismiss: { ...DEFAULT_MANUAL_DISMISS },
