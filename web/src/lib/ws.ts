@@ -15,10 +15,12 @@ export function defaultWsUrl() {
   if (typeof window === "undefined") return "ws://127.0.0.1:18766";
   const fromEnv = process.env.NEXT_PUBLIC_WS_URL;
   if (fromEnv) return fromEnv;
-  // Follow the page address, so an iPad that opened the LAN IP also
-  // connects the live socket to that same PC.
   const host = window.location.hostname || "127.0.0.1";
-  return `ws://${host}:18766`;
+  // `next dev` keeps the socket on 18766. The packaged app serves the page
+  // and the socket on the same port, so an iPad follows the address it opened.
+  if (process.env.NODE_ENV === "development") return `ws://${host}:18766`;
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host || host}`;
 }
 
 export function createCommand(

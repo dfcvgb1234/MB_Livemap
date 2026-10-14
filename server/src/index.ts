@@ -8,6 +8,14 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
+import QRCode from "qrcode";
+import {
+  enableLogFile,
+  installBundledMod,
+  lanAddresses,
+  startDesktopHost,
+  staticRootFromEnv,
+} from "./desktopHost.js";
 import {
   WHITELIST,
   emptyState,
@@ -24,6 +32,8 @@ import {
   type StatusMessage,
 } from "./types.js";
 import { createMockAutoDrive, createMockCourseplay, startMockInjector } from "./mock.js";
+
+enableLogFile(process.env.MB_LIVEMAP_LOG ?? "");
 
 const TCP_PORT = Number(process.env.MB_LIVEMAP_TCP_PORT ?? 18765);
 const WS_PORT = Number(process.env.MB_LIVEMAP_WS_PORT ?? 18766);
@@ -42,6 +52,11 @@ const SETTINGS_DIR =
 const COMMAND_FILE = path.join(SETTINGS_DIR, "commands.xml");
 const SESSION_FILE = path.join(SETTINGS_DIR, "session.xml");
 const TOKEN = process.env.MB_LIVEMAP_TOKEN ?? "";
+const STATIC_ROOT = staticRootFromEnv();
+const DESKTOP = STATIC_ROOT !== "";
+const WEB_PORT = Number(process.env.MB_LIVEMAP_PORT ?? 43127);
+const modInstall = installBundledMod(SETTINGS_DIR);
+if (modInstall.message) console.log(`[mod] ${modInstall.message}`);
 const MOCK =
   process.env.MB_LIVEMAP_MOCK === "1" ||
   process.env.MB_LIVEMAP_MOCK === "true" ||
@@ -608,6 +623,15 @@ const tcpServer = createTcpServer((socket) => {
   attachModSocket(socket, false);
 });
 
+tcpServer.on("error", (err) => {
+  const code = err instanceof Error && "code" in err ? String(err.code) : "";
+  if (code === "EADDRINUSE") {
+    console.warn(`[tcp] port ${TCP_PORT} is already in use. Close the other MB Livemap, then start this one again.`);
+    return;
+  }
+  console.warn("[tcp] server error:", err.message);
+});
+
 tcpServer.listen(TCP_PORT, "0.0.0.0", () => {
   console.log(`[tcp] listening on 0.0.0.0:${TCP_PORT}`);
 });
@@ -617,6 +641,11 @@ const pipeServer = createTcpServer((socket) => {
   attachModSocket(socket, true);
 });
 pipeServer.on("error", (err) => {
+  const code = err instanceof Error && "code" in err ? String(err.code) : "";
+  if (code === "EADDRINUSE") {
+    console.warn("[pipe] another MB Livemap is already using the game connection. Close that one, then start this one again.");
+    return;
+  }
   console.warn("[pipe] server error:", err.message);
 });
 if (process.platform === "win32") {
@@ -632,10 +661,7 @@ if (process.platform === "win32") {
   setInterval(flushPipeCommands, 200);
 }
 
-// --- WebSocket (web) ---
-const wsHttp = createHttpServer();
-const wss = new WebSocketServer({ server: wsHttp });
-
+function attachWebClients(wss: WebSocketServer) {
 wss.on("connection", (ws, req) => {
   if (TOKEN) {
     const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
@@ -690,10 +716,7 @@ wss.on("connection", (ws, req) => {
     console.log(`[ws] client disconnected (${webClients.size})`);
   });
 });
-
-wsHttp.listen(WS_PORT, "0.0.0.0", () => {
-  console.log(`[ws] listening on 0.0.0.0:${WS_PORT}`);
-});
+}
 
 // --- HTTP health / control ---
 const app = new Hono();
@@ -704,7 +727,7 @@ app.get("/health", (c) =>
     ok: true,
     tcpPort: TCP_PORT,
     pipe: process.platform === "win32" ? PIPE_PATH : null,
-    wsPort: WS_PORT,
+    wsPort: DESKTOP ? WEB_PORT : WS_PORT,
     modConnected: modSocket !== null && !modSocket.destroyed,
     mockActive,
     lastStateTs,
@@ -713,27 +736,60 @@ app.get("/health", (c) =>
 
 app.get("/state", (c) => c.json(latestState));
 
-app.post("/mock/start", (c) => {
-  if (!mockActive) {
-    mockActive = true;
-    stopMock = startMockInjector(setState, 2, broadcast);
-    setAutoDrive(createMockAutoDrive(), true);
-    setCourseplay(createMockCourseplay(), true);
-  }
-  return c.json({ mockActive: true });
+app.get("/api/connect", async (c) => {
+  const port = DESKTOP ? WEB_PORT : 43127;
+  const links = await Promise.all(
+    lanAddresses().map(async (ip) => {
+      const url = `http://${ip}:${port}/`;
+      const qr = await QRCode.toDataURL(url, {
+        margin: 1,
+        width: 280,
+        color: { dark: "#17140f", light: "#ffffff" },
+      });
+      return { url, qr };
+    }),
+  );
+  return c.json({ links, mod: modInstall });
 });
 
-app.post("/mock/stop", (c) => {
-  mockActive = false;
-  stopMock?.();
-  stopMock = null;
-  broadcast(statusPayload());
-  return c.json({ mockActive: false });
-});
+if (!DESKTOP || MOCK) {
+  app.post("/mock/start", (c) => {
+    if (!mockActive) {
+      mockActive = true;
+      stopMock = startMockInjector(setState, 2, broadcast);
+      setAutoDrive(createMockAutoDrive(), true);
+      setCourseplay(createMockCourseplay(), true);
+    }
+    return c.json({ mockActive: true });
+  });
 
-serve({ fetch: app.fetch, port: HTTP_PORT, hostname: "0.0.0.0" }, () => {
-  console.log(`[http] health on http://0.0.0.0:${HTTP_PORT}/health`);
-});
+  app.post("/mock/stop", (c) => {
+    mockActive = false;
+    stopMock?.();
+    stopMock = null;
+    broadcast(statusPayload());
+    return c.json({ mockActive: false });
+  });
+}
+
+if (DESKTOP) {
+  startDesktopHost({
+    port: WEB_PORT,
+    staticRoot: STATIC_ROOT,
+    fetch: app.fetch,
+    attach: attachWebClients,
+  });
+} else {
+  const wsHttp = createHttpServer();
+  const wss = new WebSocketServer({ server: wsHttp });
+  attachWebClients(wss);
+  wsHttp.listen(WS_PORT, "0.0.0.0", () => {
+    console.log(`[ws] listening on 0.0.0.0:${WS_PORT}`);
+  });
+  serve({ fetch: app.fetch, port: HTTP_PORT, hostname: "0.0.0.0" }, () => {
+    console.log(`[http] health on http://0.0.0.0:${HTTP_PORT}/health`);
+  });
+}
 
 if (MOCK) {
   console.log("[mock] mock injector enabled");
@@ -741,5 +797,7 @@ if (MOCK) {
 }
 
 console.log(
-  `[bridge] ready — TCP ${TCP_PORT} · PIPE ${PIPE_PATH} · WS ${WS_PORT} · HTTP ${HTTP_PORT}${MOCK ? " · MOCK" : ""}`,
+  DESKTOP
+    ? `[bridge] ready — desktop http://0.0.0.0:${WEB_PORT} · PIPE ${PIPE_PATH}${MOCK ? " · MOCK" : ""}`
+    : `[bridge] ready — TCP ${TCP_PORT} · PIPE ${PIPE_PATH} · WS ${WS_PORT} · HTTP ${HTTP_PORT}${MOCK ? " · MOCK" : ""}`,
 );

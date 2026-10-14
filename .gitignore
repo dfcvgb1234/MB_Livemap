@@ -7,7 +7,10 @@ dist/
 .env
 .env.local
 web/.env*.local
+web/out/
 server/dist/
+release/out/
+release/cache/
 *.tsbuildinfo
 .cursor/
 Examples/

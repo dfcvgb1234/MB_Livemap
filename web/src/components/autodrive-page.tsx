@@ -9,13 +9,14 @@ import { useLivemapContext } from "@/components/livemap-provider";
 import { courseLanes, defaultCourseLane } from "@/lib/course-lanes";
 import type { CourseplayStart, Vehicle } from "@/lib/types";
 
-export function AutoDrivePage({ initialVehicleId }: { initialVehicleId: string | null }) {
+export function AutoDrivePage() {
   const { state, autoDrive, courseplay, connection, bridgeStatus, error, sendCommand, lastResult } =
     useLivemapContext();
   const [selected, setSelected] = useState<Vehicle | null>(null);
   const [courseId, setCourseId] = useState("");
   const [lane, setLane] = useState(0);
   const [startAt, setStartAt] = useState<CourseplayStart>("first");
+  const [linkedVehicleId, setLinkedVehicleId] = useState<string | null>(null);
   const appliedVehicle = useRef<string | null>(null);
 
   const liveSelected =
@@ -24,12 +25,17 @@ export function AutoDrivePage({ initialVehicleId }: { initialVehicleId: string |
       : (state?.vehicles.find((vehicle) => vehicle.id === selected.id) ?? selected);
 
   useEffect(() => {
-    if (!initialVehicleId || appliedVehicle.current === initialVehicleId || !state) return;
-    const vehicle = state.vehicles.find((item) => item.id === initialVehicleId);
+    const vehicle = new URLSearchParams(window.location.search).get("vehicle");
+    setLinkedVehicleId(vehicle && vehicle.length > 0 ? vehicle : null);
+  }, []);
+
+  useEffect(() => {
+    if (!linkedVehicleId || appliedVehicle.current === linkedVehicleId || !state) return;
+    const vehicle = state.vehicles.find((item) => item.id === linkedVehicleId);
     if (!vehicle) return;
     setSelected(vehicle);
-    appliedVehicle.current = initialVehicleId;
-  }, [initialVehicleId, state]);
+    appliedVehicle.current = linkedVehicleId;
+  }, [linkedVehicleId, state]);
 
   const networkReady = autoDrive?.available === true;
   const markerCount = autoDrive?.markers?.length ?? 0;
