@@ -8,7 +8,52 @@ local ALLOWED = {
     ["engine.stop"] = true,
     ["attach"] = true,
     ["detach"] = true,
+    ["autodrive.start"] = true,
+    ["autodrive.stop"] = true,
 }
+
+local FILL_NAME_CANDIDATES = {
+    corn = { "MAIZE", "CORN" },
+    redbeet = { "BEETROOT", "REDBEET" },
+    grass = { "GRASS_WINDROW", "GRASS" },
+}
+
+local function compactName(value)
+    return string.lower((tostring(value):gsub("[^%w]", "")))
+end
+
+local function fillTypeIndexFromFruit(name)
+    if type(name) ~= "string" or name == "" then
+        return nil
+    end
+    local numeric = tonumber(name)
+    if numeric ~= nil and numeric > 0 then
+        return numeric
+    end
+    local key = compactName(name)
+    local candidates = FILL_NAME_CANDIDATES[key] or { string.upper(name) }
+    if g_fillTypeManager ~= nil and g_fillTypeManager.getFillTypeIndexByName ~= nil then
+        for _, fillName in ipairs(candidates) do
+            local index = g_fillTypeManager:getFillTypeIndexByName(fillName)
+            if type(index) == "number" and index > 0 and (FillType == nil or index ~= FillType.UNKNOWN) then
+                return index
+            end
+        end
+    end
+    if g_fillTypeManager ~= nil and type(g_fillTypeManager.fillTypes) == "table" then
+        local wanted = {}
+        for _, fillName in ipairs(candidates) do
+            wanted[compactName(fillName)] = true
+        end
+        wanted[key] = true
+        for _, fillType in pairs(g_fillTypeManager.fillTypes) do
+            if type(fillType) == "table" and type(fillType.name) == "string" and wanted[compactName(fillType.name)] and type(fillType.index) == "number" and fillType.index > 0 then
+                return fillType.index
+            end
+        end
+    end
+    return nil
+end
 
 local function findVehicleById(vehicleId)
     if vehicleId == nil then
@@ -88,6 +133,89 @@ function CommandHandler:handle(cmd)
             else
                 error("attach unsupported or missing targetId")
             end
+        elseif action == "autodrive.start" then
+            local autoDrive, graph = AutoDriveSync.resolve()
+            if autoDrive == nil or graph == nil or autoDrive.StartDriving == nil then
+                error("AutoDrive is not loaded")
+            end
+            if vehicle.ad == nil or vehicle.ad.stateModule == nil then
+                error("Vehicle does not support AutoDrive")
+            end
+            if vehicle.ad.stateModule.isActive ~= nil and vehicle.ad.stateModule:isActive() then
+                error("AutoDrive is already running")
+            end
+
+            local modeName = cmd.mode
+            if modeName == nil or modeName == "" then
+                modeName = "drive"
+            end
+            local modeNumber = nil
+            local needsSecond = false
+            local needsFill = false
+            if modeName == "drive" then
+                modeNumber = autoDrive.MODE_DRIVETO
+            elseif modeName == "pickup" then
+                modeNumber = autoDrive.MODE_PICKUPANDDELIVER
+                needsSecond = true
+                needsFill = true
+            elseif modeName == "deliver" then
+                modeNumber = autoDrive.MODE_DELIVERTO
+            elseif modeName == "load" then
+                modeNumber = autoDrive.MODE_LOAD
+                needsSecond = true
+                needsFill = true
+            elseif modeName == "unload" then
+                modeNumber = autoDrive.MODE_UNLOAD
+                needsSecond = true
+            else
+                error("Unknown AutoDrive mode")
+            end
+            if modeNumber == nil then
+                error("AutoDrive mode is not available")
+            end
+
+            local firstId = tonumber(cmd.targetId)
+            if firstId == nil or graph:getMapMarkerById(firstId) == nil then
+                error("Unknown destination")
+            end
+            local secondId = firstId
+            if needsSecond then
+                secondId = tonumber(cmd.secondTargetId)
+                if secondId == nil or graph:getMapMarkerById(secondId) == nil then
+                    error("Unknown second destination")
+                end
+            end
+
+            if vehicle.ad.stateModule.setMode ~= nil then
+                vehicle.ad.stateModule:setMode(modeNumber)
+                if vehicle.ad.stateModule.getMode ~= nil and vehicle.ad.stateModule:getMode() ~= modeNumber then
+                    error("AutoDrive could not switch mode")
+                end
+            end
+
+            if needsFill then
+                local fillIndex = fillTypeIndexFromFruit(cmd.fillType)
+                if fillIndex == nil or fillIndex <= 0 then
+                    error("Choose a fruit type")
+                end
+                if vehicle.ad.stateModule.setFillType == nil then
+                    error("Fruit type is not available")
+                end
+                vehicle.ad.stateModule:setFillType(fillIndex)
+                if vehicle.ad.stateModule.getFillType ~= nil and vehicle.ad.stateModule:getFillType() ~= fillIndex then
+                    error("Fruit type is not supported by this vehicle")
+                end
+            end
+
+            autoDrive:StartDriving(vehicle, firstId, secondId, nil, nil, nil)
+            if vehicle.ad.stateModule.isActive ~= nil and not vehicle.ad.stateModule:isActive() then
+                error("AutoDrive did not start")
+            end
+        elseif action == "autodrive.stop" then
+            if vehicle.stopAutoDrive == nil then
+                error("AutoDrive is not available on this vehicle")
+            end
+            vehicle:stopAutoDrive()
         elseif action == "detach" then
             if vehicle.detachImplement ~= nil then
                 -- Detach first implement when index API is present.

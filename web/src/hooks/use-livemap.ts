@@ -7,6 +7,8 @@ import {
   LivemapSocket,
 } from "@/lib/ws";
 import type {
+  AutoDriveGraph,
+  AutoDriveMode,
   CommandResult,
   ConnectionStatus,
   GameState,
@@ -16,6 +18,7 @@ import type {
 
 export function useLivemap() {
   const [state, setState] = useState<GameState | null>(null);
+  const [autoDrive, setAutoDrive] = useState<AutoDriveGraph | null>(null);
   const [bridgeStatus, setBridgeStatus] = useState<StatusMessage | null>(null);
   const [connection, setConnection] = useState<ConnectionStatus>("connecting");
   const [lastResult, setLastResult] = useState<CommandResult | null>(null);
@@ -29,6 +32,7 @@ export function useLivemap() {
         setState(s);
         setError(null);
       },
+      onAutoDrive: setAutoDrive,
       onStatus: setBridgeStatus,
       onCommandResult: setLastResult,
       onConnection: (ok) => {
@@ -47,8 +51,13 @@ export function useLivemap() {
   }, []);
 
   const sendCommand = useCallback(
-    (action: WhitelistAction, vehicleId: string, targetId?: string) => {
-      const cmd = createCommand(action, vehicleId, targetId);
+    (
+      action: WhitelistAction,
+      vehicleId: string,
+      targetId?: string,
+      extra?: { mode?: AutoDriveMode; secondTargetId?: string; fillType?: string },
+    ) => {
+      const cmd = createCommand(action, vehicleId, targetId, extra);
       const ok = socketRef.current?.sendCommand(cmd) ?? false;
       if (!ok) {
         setError("Not connected to bridge");
@@ -60,6 +69,7 @@ export function useLivemap() {
 
   return {
     state,
+    autoDrive,
     bridgeStatus,
     connection,
     lastResult,

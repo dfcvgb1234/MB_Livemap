@@ -10,7 +10,6 @@ type Props = {
 };
 
 export function ConnectionBanner({ connection, bridgeStatus, error }: Props) {
-  const offline = connection !== "connected";
   const usingMock = bridgeStatus?.mockActive;
   const modOk = bridgeStatus?.modConnected;
 
@@ -24,42 +23,28 @@ export function ConnectionBanner({ connection, bridgeStatus, error }: Props) {
     label = "Reconnecting to bridge…";
     tone = "warn";
   } else if (connection === "disconnected") {
-    label = "Bridge offline — start the server (npm run mock)";
+    label = "Bridge offline";
     tone = "bad";
   } else if (usingMock) {
     label = "Live mock data (FS25 not connected)";
     tone = "warn";
   } else if (modOk) {
-    label = "Live from FS25 mod";
-    tone = "ok";
+    return null;
   } else {
-    label = "Bridge connected — waiting for mod or mock";
+    label = "Waiting for the game";
     tone = "warn";
   }
 
   return (
-    <div
+    <p
       className={cn(
-        "flex min-h-11 items-center justify-between gap-3 rounded-lg px-4 py-2 text-sm font-medium",
-        tone === "ok" && "bg-emerald-950/80 text-emerald-100",
-        tone === "warn" && "bg-amber-950/80 text-amber-100",
-        tone === "bad" && "bg-red-950/85 text-red-100",
+        "mb-3 rounded-[10px] px-3 py-2.5 text-sm",
+        tone === "warn" && "bg-[#e2b657]/16 text-[#f3efe4]",
+        tone === "bad" && "bg-[#e07a6a]/16 text-[#ffd2cb]",
       )}
       role="status"
     >
-      <div className="flex items-center gap-2">
-        <span
-          className={cn(
-            "inline-block size-2.5 rounded-full",
-            tone === "ok" && "bg-emerald-400 animate-pulse",
-            tone === "warn" && "bg-amber-400 animate-pulse",
-            tone === "bad" && "bg-red-400",
-            offline && "animate-pulse",
-          )}
-        />
-        <span>{label}</span>
-      </div>
-      {error ? <span className="truncate text-xs opacity-80">{error}</span> : null}
-    </div>
+      {error ? `${label}. ${error}` : label}
+    </p>
   );
 }

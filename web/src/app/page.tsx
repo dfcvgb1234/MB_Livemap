@@ -4,68 +4,45 @@ import { useState } from "react";
 import { Livemap } from "@/components/livemap";
 import { WeatherStrip } from "@/components/weather-strip";
 import { CropCalendar } from "@/components/crop-calendar";
-import { VehicleRail } from "@/components/vehicle-rail";
+import { AnimalCards, ProductionCards } from "@/components/farm-cards";
 import { VehicleSheet } from "@/components/vehicle-sheet";
+import { ConnectionBanner } from "@/components/connection-banner";
 import { useLivemapContext } from "@/components/livemap-provider";
 import type { Vehicle } from "@/lib/types";
 
 export default function HomePage() {
-  const { state, connection, sendCommand, lastResult } = useLivemapContext();
+  const { state, connection, bridgeStatus, error, sendCommand, lastResult } = useLivemapContext();
   const [selected, setSelected] = useState<Vehicle | null>(null);
-  const [sheetOpen, setSheetOpen] = useState(false);
 
-  const loading = connection === "connecting" && !state;
   const liveSelected =
     selected == null
       ? null
-      : (state?.vehicles.find((v) => v.id === selected.id) ?? selected);
-
-  const openVehicle = (v: Vehicle) => {
-    setSelected(v);
-    // Defer open so the same pointer event cannot dismiss the sheet.
-    window.setTimeout(() => setSheetOpen(true), 0);
-  };
+      : (state?.vehicles.find((vehicle) => vehicle.id === selected.id) ?? selected);
 
   return (
-    <div className="flex flex-1 flex-col gap-4">
-      <section className="relative overflow-hidden sm:rounded-2xl sm:shadow-lg">
-        {loading ? (
-          <div className="flex min-h-[min(70vh,640px)] items-center justify-center bg-[#1a2618] text-stone-200">
-            <div className="text-center">
-              <div className="mx-auto mb-3 size-8 animate-spin rounded-full border-2 border-lime-500 border-t-transparent" />
-              <p className="font-medium">Loading livemap…</p>
-            </div>
-          </div>
-        ) : (
-          <Livemap
-            state={state}
-            selectedId={liveSelected?.id}
-            onSelectVehicle={openVehicle}
-          />
-        )}
-        <div className="pointer-events-none absolute left-3 right-3 top-3 z-20 sm:left-4 sm:right-auto sm:w-[min(100%,28rem)]">
-          <div className="pointer-events-auto">
-            <WeatherStrip weather={state?.weather ?? null} />
-          </div>
-        </div>
-      </section>
-
-      <div className="space-y-4 px-4 sm:px-0">
-        <VehicleRail
-          vehicles={state?.vehicles ?? []}
+    <div className="grid min-h-full grid-cols-1 min-[1200px]:h-full min-[1200px]:min-h-0 min-[1200px]:grid-cols-[minmax(0,1fr)_minmax(520px,38vw)] min-[1200px]:overflow-hidden">
+      <section className="relative h-[68dvh] min-w-0 bg-[#100e0b] min-[1200px]:h-full">
+        <Livemap
+          state={state}
           selectedId={liveSelected?.id}
-          onSelect={openVehicle}
+          onSelectVehicle={setSelected}
         />
+      </section>
+      <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1200px]:overflow-auto min-[1200px]:border-t-0 min-[1200px]:border-l">
+        <ConnectionBanner connection={connection} bridgeStatus={bridgeStatus} error={error} />
+        <VehicleSheet
+          embedded
+          vehicle={liveSelected}
+          open={false}
+          onOpenChange={() => {}}
+          onCommand={sendCommand}
+          lastResult={lastResult}
+        />
+        <WeatherStrip weather={state?.weather ?? null} />
         <CropCalendar fields={state?.fields ?? []} />
-      </div>
-
-      <VehicleSheet
-        vehicle={liveSelected}
-        open={sheetOpen}
-        onOpenChange={(next) => setSheetOpen(next)}
-        onCommand={sendCommand}
-        lastResult={lastResult}
-      />
+        <ProductionCards productions={state?.productions ?? []} />
+        <AnimalCards animals={state?.animals ?? []} />
+      </aside>
     </div>
   );
 }

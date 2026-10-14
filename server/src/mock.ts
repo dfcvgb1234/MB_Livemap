@@ -1,4 +1,4 @@
-import type { GameState } from "./types.js";
+import type { AutoDriveGraph, GameState } from "./types.js";
 
 const FRUITS = [
   "wheat",
@@ -28,42 +28,104 @@ export function createMockState(t = Date.now()): GameState {
       id: "v-tractor-1",
       name: "Fendt 942",
       type: "tractor",
-      x: mid + Math.cos(rad) * 180,
-      z: mid + Math.sin(rad) * 140,
+      category: "vehicle" as const,
+      x: Math.cos(rad) * 180,
+      z: Math.sin(rad) * 140,
       heading: ((phase + 90) % 360) * (Math.PI / 180),
       speed: 12 + Math.sin(rad * 2) * 2,
       engineOn: true,
+      occupied: true,
       attached: ["Seeder"],
+      fills: [
+        { name: "Diesel", fillLevel: 312, capacity: 400 },
+        { name: "Seeder · Seeds", fillLevel: 800, capacity: 1500 },
+      ],
+      damage: 0.04,
+      adCapable: true,
+      adActive: false,
+      adFillTypes: [
+        { id: "1", name: "Wheat" },
+        { id: "2", name: "Barley" },
+        { id: "3", name: "Corn" },
+      ],
     },
     {
       id: "v-harvester-1",
       name: "Lexion 8900",
       type: "harvester",
-      x: mid - 160 + Math.sin(rad * 0.4) * 20,
-      z: mid + 280,
+      category: "vehicle" as const,
+      x: -160 + Math.sin(rad * 0.4) * 20,
+      z: 280,
       heading: Math.PI * 0.15,
       speed: 8,
       engineOn: true,
       attached: ["Header 12m"],
+      fills: [
+        { name: "Diesel", fillLevel: 540, capacity: 800 },
+        { name: "Wheat", fillLevel: 8200, capacity: 14500 },
+      ],
+      damage: 0.11,
+      adCapable: true,
+      adActive: true,
+      adDestination: "Silo",
+      adMode: "drive" as const,
     },
     {
       id: "v-truck-1",
       name: "MAN TGS",
       type: "truck",
-      x: mid + 340,
-      z: mid - 90,
+      category: "vehicle" as const,
+      x: 340,
+      z: -90,
       heading: -Math.PI / 2,
       speed: 0,
       engineOn: false,
       attached: [],
+      fills: [{ name: "Diesel", fillLevel: 120, capacity: 600 }],
+      damage: 0,
+      adCapable: true,
+      adActive: false,
+      adFillTypes: [
+        { id: "1", name: "Wheat" },
+        { id: "3", name: "Corn" },
+      ],
+    },
+    {
+      id: "v-seeder-1",
+      name: "Seeder",
+      type: "sowingMachine",
+      category: "implement" as const,
+      x: Math.cos(rad) * 180 + 12,
+      z: Math.sin(rad) * 140 - 8,
+      heading: ((phase + 90) % 360) * (Math.PI / 180),
+      speed: 12,
+      engineOn: false,
+      attached: [],
+      fills: [{ name: "Seeds", fillLevel: 800, capacity: 1500 }],
+      damage: 0.02,
+    },
+    {
+      id: "v-trailer-1",
+      name: "Cramminge 20",
+      type: "trailer",
+      category: "trailer" as const,
+      x: 80,
+      z: 40,
+      heading: 0.4,
+      speed: 0,
+      engineOn: false,
+      attached: [],
+      fills: [{ name: "Wheat", fillLevel: 14000, capacity: 24000 }],
+      damage: 0.08,
     },
   ];
 
   const fields = Array.from({ length: 12 }, (_, i) => {
     const col = i % 4;
     const row = Math.floor(i / 4);
-    const ox = 200 + col * 420;
-    const oz = 260 + row * 480;
+    const ox = 200 + col * 420 - mid;
+    // +Z is the bottom of the map. Negate the old north-up row so field 1 stays on screen at the top.
+    const oz = 260 + row * 480 - mid;
     const w = 280;
     const h = 320;
     const fruit = FRUITS[i % FRUITS.length];
@@ -86,8 +148,42 @@ export function createMockState(t = Date.now()): GameState {
     };
   });
 
-  const conditions = ["sunny", "partlyCloudy", "cloudy", "rain", "fog"];
-  const condition = conditions[Math.floor((phase / 60) % conditions.length)];
+  const hourTypes = ["SUN", "PARTIALLY_CLOUDY", "CLOUDY", "RAIN", "CLOUDY", "SUN"];
+  const condition = hourTypes[Math.floor((phase / 60) % hourTypes.length)];
+  const temperatureC = Math.round(14 + Math.sin(rad) * 6);
+  const hourly = [
+    {
+      label: "Now",
+      type: condition,
+      temperatureC,
+      lowTemperatureC: null,
+      highTemperatureC: null,
+      windRotation: 0.8,
+      windVelocity: 3,
+    },
+    ...Array.from({ length: 12 }, (_, index) => {
+      const hour = (8 + index * 2) % 24;
+      return {
+        label: `${String(hour).padStart(2, "0")}:00`,
+        type: hourTypes[(index + 1) % hourTypes.length],
+        temperatureC: Math.round(temperatureC + Math.sin(index / 2) * 3),
+        lowTemperatureC: null,
+        highTemperatureC: null,
+        windRotation: (index * 0.4) % (Math.PI * 2),
+        windVelocity: 2 + (index % 4),
+      };
+    }),
+  ];
+  const dayLabels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+  const daily = dayLabels.map((label, index) => ({
+    label,
+    type: hourTypes[index % hourTypes.length],
+    temperatureC: null,
+    lowTemperatureC: 6 + index,
+    highTemperatureC: 14 + (index % 5),
+    windRotation: (index * 0.7) % (Math.PI * 2),
+    windVelocity: 2 + (index % 5),
+  }));
 
   return {
     type: "state",
@@ -98,14 +194,9 @@ export function createMockState(t = Date.now()): GameState {
     vehicles,
     weather: {
       condition,
-      temperatureC: Math.round(14 + Math.sin(rad) * 6),
-      forecast: [
-        { day: "Today", condition, tempMinC: 10, tempMaxC: 18 },
-        { day: "Tue", condition: "partlyCloudy", tempMinC: 9, tempMaxC: 16 },
-        { day: "Wed", condition: "rain", tempMinC: 8, tempMaxC: 13 },
-        { day: "Thu", condition: "cloudy", tempMinC: 7, tempMaxC: 14 },
-        { day: "Fri", condition: "sunny", tempMinC: 11, tempMaxC: 19 },
-      ],
+      temperatureC,
+      hourly,
+      daily,
     },
     fields,
     productions: [
@@ -113,6 +204,10 @@ export function createMockState(t = Date.now()): GameState {
         id: "prod-dairy",
         name: "Dairy Plant",
         status: "active",
+        lines: [
+          { name: "Butter", status: "RUNNING" },
+          { name: "Cheese", status: "MISSING_INPUTS" },
+        ],
         inputs: [
           { name: "Milk", fillLevel: 6200, capacity: 10000 },
           { name: "Diesel", fillLevel: 800, capacity: 2000 },
@@ -152,10 +247,18 @@ export function createMockState(t = Date.now()): GameState {
         name: "Cow Pasture",
         animalType: "cow",
         count: 42,
+        capacity: 80,
         health: 0.92,
-        productivity: 0.88,
-        x: mid - 400,
-        z: mid - 320,
+        productivity: 88,
+        herds: [{ name: "Holstein", count: 42 }],
+        fills: [
+          { name: "Hay (40%)", fillLevel: 4000, capacity: 12000 },
+          { name: "Water", fillLevel: 1800, capacity: 3000 },
+          { name: "Milk", fillLevel: 900, capacity: 2000 },
+        ],
+        palletBlocked: false,
+        x: -400,
+        z: -320,
       },
       {
         id: "anim-pigs",
@@ -164,8 +267,8 @@ export function createMockState(t = Date.now()): GameState {
         count: 86,
         health: 0.85,
         productivity: 0.79,
-        x: mid + 420,
-        z: mid + 160,
+        x: 420,
+        z: 160,
       },
       {
         id: "anim-chickens",
@@ -174,8 +277,8 @@ export function createMockState(t = Date.now()): GameState {
         count: 210,
         health: 0.95,
         productivity: 0.91,
-        x: mid - 120,
-        z: mid + 480,
+        x: -120,
+        z: 480,
       },
       {
         id: "anim-sheep",
@@ -184,9 +287,31 @@ export function createMockState(t = Date.now()): GameState {
         count: null,
         health: null,
         productivity: null,
-        x: mid + 200,
-        z: mid - 480,
+        x: 200,
+        z: -480,
       },
+    ],
+  };
+}
+
+/** A small named network so the AutoDrive page can be checked without the game. */
+export function createMockAutoDrive(): AutoDriveGraph {
+  return {
+    type: "autodrive",
+    available: true,
+    revision: 1,
+    waypoints: [
+      { id: 1, x: -200, z: -80, out: [2] },
+      { id: 2, x: 0, z: -80, out: [1, 3, 4] },
+      { id: 3, x: 200, z: -40, out: [2, 5] },
+      { id: 4, x: 40, z: 160, out: [2, 6] },
+      { id: 5, x: 360, z: 80, out: [3] },
+      { id: 6, x: -80, z: 320, out: [4] },
+    ],
+    markers: [
+      { id: 1, name: "Farm", x: -200, z: -80 },
+      { id: 2, name: "Shop", x: 360, z: 80 },
+      { id: 3, name: "Silo", x: -80, z: 320 },
     ],
   };
 }

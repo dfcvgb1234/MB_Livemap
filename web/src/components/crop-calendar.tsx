@@ -1,9 +1,8 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
-import { CROP_CALENDAR, MONTHS, fruitColor } from "@/lib/crop-calendar";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { CROP_CALENDAR, MONTHS, calendarKey } from "@/lib/crop-calendar";
 import type { Field } from "@/lib/types";
-import { growthLabel } from "@/lib/crop-calendar";
 
 type Props = {
   fields: Field[];
@@ -23,129 +22,99 @@ function getServerMonth() {
 
 export function CropCalendar({ fields }: Props) {
   const month = useSyncExternalStore(subscribe, getMonth, getServerMonth);
+  const frameRef = useRef<HTMLDivElement>(null);
+  const [markerLeft, setMarkerLeft] = useState<number | null>(null);
   const present = new Set(
-    fields.map((f) => f.fruitType).filter(Boolean) as string[],
+    fields
+      .map((f) => calendarKey(f.fruitType))
+      .filter((key): key is string => key != null),
   );
 
-  const rows =
-    present.size > 0
-      ? CROP_CALENDAR.filter((c) => present.has(c.fruit))
-      : CROP_CALENDAR;
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    const headers = frame.querySelectorAll("th");
+    const cropWidth = headers[0]?.getBoundingClientRect().width ?? 0;
+    let monthsWidth = 0;
+    for (let index = 1; index < headers.length; index += 1) {
+      monthsWidth += headers[index].getBoundingClientRect().width;
+    }
+    const fraction = (month - 0.5) / 12;
+    setMarkerLeft(cropWidth + fraction * monthsWidth);
+  }, [month, fields.length]);
 
   return (
-    <section className="rounded-2xl bg-stone-50/95 p-4 shadow-sm ring-1 ring-stone-200/80">
-      <div className="mb-3 flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight text-stone-900">
-            Crop calendar
-          </h2>
-          <p className="text-sm text-stone-600">
-            Sow / harvest windows for crops on your fields
-          </p>
-        </div>
-        <span className="rounded-md bg-lime-100 px-2 py-1 text-xs font-medium text-lime-900">
-          Month {month}
+    <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+      <h2 className="text-[15px] font-semibold tracking-[0.04em] uppercase">Crop calendar</h2>
+      <p className="mt-1 text-[13px] text-[#b7b1a4]">Month {month}</p>
+      <div className="mt-2.5 flex flex-wrap gap-x-3.5 gap-y-2 text-xs text-[#b7b1a4]">
+        <span className="inline-flex items-center gap-1.5">
+          <i className="size-3.5 rounded-[3px] bg-[#8fb56a]/85" /> Plant
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <i className="size-3.5 rounded-[3px] bg-[#d9783c]/90" /> Harvest
+        </span>
+        <span className="inline-flex items-center gap-1.5">
+          <i className="size-3.5 rounded-[3px] bg-[#e2c14a]" /> Plant and harvest
         </span>
       </div>
-
-      {fields.length === 0 ? (
-        <p className="rounded-lg bg-stone-100 px-3 py-4 text-sm text-stone-600">
-          No field data yet. When the mod reports fields, growth stages appear
-          here alongside the seasonal calendar.
-        </p>
-      ) : (
-        <ul className="mb-4 grid gap-2 sm:grid-cols-2">
-          {fields.slice(0, 8).map((f) => (
-            <li
-              key={f.id}
-              className="flex items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-sm ring-1 ring-stone-200"
-            >
-              <span className="flex items-center gap-2 font-medium text-stone-800">
-                <span
-                  className="size-2.5 rounded-full"
-                  style={{ background: fruitColor(f.fruitType) }}
-                />
-                {/^field[-_]?/i.test(f.id) ? f.id.replace(/^field[-_]?/i, "Field ") : `Field ${f.id}`}
-                <span className="font-normal text-stone-500">
-                  {f.fruitType ?? "unknown crop"}
-                </span>
-              </span>
-              <span className="text-xs text-stone-500">
-                {growthLabel(f.growthState, f.growthMax)}
-                {f.owned === false ? " · not owned" : ""}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[36rem] border-collapse text-sm">
-          <thead>
-            <tr>
-              <th className="sticky left-0 bg-stone-50 px-2 py-1 text-left font-medium text-stone-600">
-                Crop
-              </th>
-              {MONTHS.map((m, i) => (
-                <th
-                  key={`${m}-${i}`}
-                  className={`px-1 py-1 text-center font-medium ${
-                    i + 1 === month ? "text-lime-800" : "text-stone-500"
-                  }`}
-                >
-                  {m}
+      <div className="mt-2.5 overflow-x-auto">
+        <div ref={frameRef} className="relative w-max min-w-full">
+          <table className="w-max min-w-full border-separate border-spacing-y-[3px] text-[11px]">
+            <thead>
+              <tr>
+                <th className="sticky left-0 z-[2] min-w-[92px] bg-[#2b261e] px-1.5 py-1 text-left">
+                  Crop
                 </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((crop) => (
-              <tr key={crop.fruit}>
-                <td className="sticky left-0 bg-stone-50 px-2 py-1.5 font-medium text-stone-800">
-                  {crop.label}
-                </td>
-                {MONTHS.map((_, i) => {
-                  const m = i + 1;
-                  const sow = crop.sow.includes(m);
-                  const harvest = crop.harvest.includes(m);
-                  return (
-                    <td key={m} className="px-1 py-1.5">
-                      <div
-                        className={`mx-auto h-6 w-full max-w-8 rounded ${
-                          sow && harvest
-                            ? "bg-gradient-to-r from-sky-400 to-amber-400"
-                            : sow
-                              ? "bg-sky-400"
-                              : harvest
-                                ? "bg-amber-400"
-                                : i + 1 === month
-                                  ? "bg-stone-200"
-                                  : "bg-stone-100"
-                        }`}
-                        title={
-                          sow && harvest
-                            ? "Sow & harvest"
-                            : sow
-                              ? "Sow"
-                              : harvest
-                                ? "Harvest"
-                                : ""
-                        }
-                      />
-                    </td>
-                  );
-                })}
+                {MONTHS.map((name, index) => (
+                  <th key={`${name}-${index}`} className="px-1.5 py-1 text-center">
+                    {name}
+                  </th>
+                ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="mt-2 flex gap-4 text-xs text-stone-500">
-          <span className="flex items-center gap-1.5">
-            <span className="size-3 rounded bg-sky-400" /> Sow
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="size-3 rounded bg-amber-400" /> Harvest
-          </span>
+            </thead>
+            <tbody>
+              {CROP_CALENDAR.map((crop) => (
+                <tr key={crop.fruit}>
+                  <td className="sticky left-0 z-[2] bg-[#2b261e] px-1.5 py-1 text-left">
+                    <span className="inline-flex items-center gap-1.5">
+                      {present.has(crop.fruit) ? (
+                        <span className="size-1.5 shrink-0 rounded-full bg-[#8fb56a]" title="On the map" />
+                      ) : null}
+                      {crop.label}
+                    </span>
+                  </td>
+                  {MONTHS.map((_, index) => {
+                    const value = index + 1;
+                    const sow = crop.sow.includes(value);
+                    const harvest = crop.harvest.includes(value);
+                    const title = sow && harvest ? "Plant / Harvest" : sow ? "Plant" : harvest ? "Harvest" : "";
+                    return (
+                      <td
+                        key={value}
+                        title={title}
+                        className={`border-b border-white/10 px-1.5 py-1 ${
+                          sow && harvest
+                            ? "bg-[#e2c14a]"
+                            : sow
+                              ? "bg-[#8fb56a]/85"
+                              : harvest
+                                ? "bg-[#d9783c]/90"
+                                : ""
+                        }`}
+                      />
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {markerLeft != null ? (
+            <div
+              className="pointer-events-none absolute top-0 bottom-0 z-[1] w-0.5 -translate-x-px bg-[#e2b657] shadow-[0_0_8px_rgba(226,182,87,0.9)]"
+              style={{ left: markerLeft }}
+            />
+          ) : null}
         </div>
       </div>
     </section>
