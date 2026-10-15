@@ -1779,6 +1779,19 @@ function StateCollector:refreshSlow()
     end, nil)
 end
 
+-- FS25 currentPeriod is 1–12 starting in March (1 = March, 11 = January, 12 = February).
+-- The livemap calendar uses calendar months, 1 = January.
+local function calendarMonthFromPeriod(period)
+    local month = period + 2
+    if month > 12 then
+        month = month - 12
+    end
+    if month < 1 then
+        month = month + 12
+    end
+    return month
+end
+
 function StateCollector:collectCalendar()
     return safeCall(function()
         local env = g_currentMission and g_currentMission.environment
@@ -1795,7 +1808,7 @@ function StateCollector:collectCalendar()
             days = 1
         end
         return {
-            period = math.floor(period),
+            period = calendarMonthFromPeriod(math.floor(period)),
             day = math.floor(day),
             daysPerPeriod = math.floor(days),
         }

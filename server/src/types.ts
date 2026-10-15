@@ -98,7 +98,7 @@ export type AnimalHusbandry = {
 };
 
 export type GameCalendar = {
-  /** In-game month, 1–12. */
+  /** Calendar month: 1 = January … 12 = December. */
   period: number;
   /** Day within that month, starting at 1. */
   day: number;
