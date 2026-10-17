@@ -31,6 +31,7 @@ import {
   type NotificationLevel,
   type StatusMessage,
 } from "./types.js";
+import { createMapOverlay } from "./mapOverlay.js";
 import { createMockAutoDrive, createMockCourseplay, startMockInjector } from "./mock.js";
 
 enableLogFile(process.env.MB_LIVEMAP_LOG ?? "");
@@ -57,6 +58,7 @@ const STATIC_ROOT = staticRootFromEnv();
 const DESKTOP = STATIC_ROOT !== "";
 const WEB_PORT = Number(process.env.MB_LIVEMAP_PORT ?? 43127);
 const modInstall = installBundledMod(SETTINGS_DIR);
+const overlay = createMapOverlay(SETTINGS_DIR);
 if (modInstall.message) console.log(`[mod] ${modInstall.message}`);
 const MOCK =
   process.env.MB_LIVEMAP_MOCK === "1" ||
@@ -132,6 +134,7 @@ function applyMockAd(state: GameState): GameState {
 function setState(state: GameState) {
   latestState = applyMockAd(state);
   lastStateTs = state.ts;
+  overlay.note(latestState);
   broadcast(latestState);
   broadcast(statusPayload());
 }
@@ -822,6 +825,51 @@ app.get("/health", (c) =>
 );
 
 app.get("/state", (c) => c.json(latestState));
+
+app.get("/api/map-overlay", async (c) => {
+  overlay.note(latestState);
+  return c.json(await overlay.status());
+});
+
+app.get("/api/map-overlay.png", async (c) => {
+  overlay.note(latestState);
+  const image = await overlay.image();
+  if (!image) return c.json({ error: "map DDS not found" }, 404);
+  return new Response(Buffer.from(image.bytes), {
+    headers: {
+      "Content-Type": image.mime,
+      "Cache-Control": "no-cache",
+      "Content-Length": String(image.bytes.byteLength),
+    },
+  });
+});
+
+app.post("/api/map-overlay", async (c) => {
+  overlay.note(latestState);
+  const body = await c.req.parseBody();
+  const uploaded = body.file;
+  if (!(uploaded instanceof Blob)) {
+    return c.json({ error: "Choose a DDS, PNG, JPEG, or WebP image" }, 400);
+  }
+  const bytes = new Uint8Array(await uploaded.arrayBuffer());
+  const filename = uploaded instanceof File ? uploaded.name : "upload";
+  const saved = await overlay.upload(filename, bytes);
+  if (!saved.ok) return c.json({ error: saved.error }, 400);
+  return c.json(await overlay.status());
+});
+
+app.post("/api/map-overlay/skip", async (c) => {
+  overlay.note(latestState);
+  const saved = await overlay.skip();
+  if (!saved.ok) return c.json({ error: saved.error }, 400);
+  return c.json(await overlay.status());
+});
+
+app.delete("/api/map-overlay", async (c) => {
+  overlay.note(latestState);
+  await overlay.clear();
+  return c.json(await overlay.status());
+});
 
 app.get("/api/connect", async (c) => {
   const port = DESKTOP ? WEB_PORT : 43127;

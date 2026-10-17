@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { Bell, Settings } from "lucide-react";
 import { ConnectButton, ConnectProvider, ConnectSheet, ModBanner } from "@/components/connect-sheet";
 import { LivemapProvider, useLivemapContext } from "@/components/livemap-provider";
+import { MapOverlayPrompt } from "@/components/map-overlay-prompt";
 import { NotificationHistorySheet } from "@/components/notification-history-sheet";
 import { SettingsProvider, useSettings } from "@/components/settings-provider";
 import { SettingsSheet } from "@/components/settings-sheet";
@@ -98,6 +99,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
       <NotificationHistorySheet />
       <SettingsSheet />
       <ConnectSheet />
+      <MapOverlayPrompt />
     </div>
   );
 }

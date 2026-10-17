@@ -1,7 +1,15 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { clearMapImage, loadMapImage, saveMapImage } from "@/lib/map-image-store";
+import { useLivemapContext } from "@/components/livemap-provider";
+import {
+  clearMapOverlay,
+  fetchMapOverlay,
+  mapOverlayImageUrl,
+  skipMapOverlay as skipMapOverlayRequest,
+  uploadMapOverlay,
+  type MapOverlayStatus,
+} from "@/lib/map-overlay";
 import { DEFAULT_COLORS, type MachineColorKey } from "@/lib/machine-colors";
 import {
   DEFAULT_SETTINGS,
@@ -12,11 +20,14 @@ import {
   type NotificationSettings,
 } from "@/lib/settings";
 
-const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
-
 type SettingsContextValue = {
   settings: AppSettings;
   mapImageUrl: string | null;
+  mapImageEditable: boolean;
+  canClearMapImage: boolean;
+  clearMapImageLabel: string;
+  overlayPrompt: boolean;
+  overlayDetail: string | null;
   imageError: string | null;
   open: boolean;
   setOpen: (open: boolean) => void;
@@ -27,49 +38,53 @@ type SettingsContextValue = {
   setNotifications: (patch: Partial<NotificationSettings>) => void;
   setMapImageFile: (file: File) => Promise<void>;
   resetMapImage: () => Promise<void>;
+  skipMapOverlay: () => Promise<void>;
 };
 
 const SettingsContext = createContext<SettingsContextValue | null>(null);
 
 export function SettingsProvider({ children }: { children: ReactNode }) {
+  const { state } = useLivemapContext();
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
-  const [mapImageUrl, setMapImageUrl] = useState<string | null>(null);
+  const [overlay, setOverlay] = useState<MapOverlayStatus | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [ready, setReady] = useState(false);
-  const urlRef = useRef<string | null>(null);
   const settingsRef = useRef(settings);
-
-  const replaceUrl = useCallback((next: string | null) => {
-    if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    urlRef.current = next;
-    setMapImageUrl(next);
-  }, []);
+  const fetchGen = useRef(0);
+  const liveMap = state?.source === "mod" && !!state.mapName;
+  const mockMap = state?.source === "mock";
 
   useEffect(() => {
     const loaded = loadSettings();
     settingsRef.current = loaded;
     setSettings(loaded);
     setReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!liveMap) {
+      setOverlay(null);
+      return;
+    }
+    const gen = ++fetchGen.current;
     let cancelled = false;
-    loadMapImage()
-      .then((blob) => {
-        if (cancelled || !blob) return;
-        replaceUrl(URL.createObjectURL(blob));
+    setOverlay(null);
+    fetchMapOverlay()
+      .then((data) => {
+        if (cancelled || gen !== fetchGen.current) return;
+        setOverlay(data);
+        setImageError(null);
       })
       .catch(() => {
-        if (!cancelled) setImageError("Could not load the saved map image");
+        if (cancelled || gen !== fetchGen.current) return;
+        setOverlay(null);
+        setImageError("Could not check the map picture");
       });
     return () => {
       cancelled = true;
     };
-  }, [replaceUrl]);
-
-  useEffect(() => {
-    return () => {
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
-    };
-  }, []);
+  }, [liveMap, state?.mapName, state?.customEnvironment, state?.mapDirectory, state?.missionDirectory]);
 
   const commit = useCallback((updater: (current: AppSettings) => AppSettings) => {
     const next = updater(settingsRef.current);
@@ -103,43 +118,62 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     [commit],
   );
 
-  const setMapImageFile = useCallback(
-    async (file: File) => {
-      if (!file.type.startsWith("image/")) {
-        setImageError("Choose a PNG, JPEG, or WebP image");
-        return;
-      }
-      if (file.size > MAX_IMAGE_BYTES) {
-        setImageError("Image is larger than 20 MB");
-        return;
-      }
-      try {
-        const blob = new Blob([await file.arrayBuffer()], { type: file.type || "image/png" });
-        await saveMapImage(blob);
-        replaceUrl(URL.createObjectURL(blob));
-        setImageError(null);
-      } catch {
-        setImageError("Could not save that image");
-      }
-    },
-    [replaceUrl],
-  );
+  const setMapImageFile = useCallback(async (file: File) => {
+    const gen = ++fetchGen.current;
+    try {
+      const data = await uploadMapOverlay(file);
+      if (gen !== fetchGen.current) return;
+      setOverlay(data);
+      setImageError(null);
+    } catch (err) {
+      if (gen !== fetchGen.current) return;
+      setImageError(err instanceof Error ? err.message : "Could not use that file");
+    }
+  }, []);
 
   const resetMapImage = useCallback(async () => {
+    const gen = ++fetchGen.current;
     try {
-      await clearMapImage();
-      replaceUrl(null);
+      const data = await clearMapOverlay();
+      if (gen !== fetchGen.current) return;
+      setOverlay(data);
       setImageError(null);
-    } catch {
-      setImageError("Could not remove the map image");
+    } catch (err) {
+      if (gen !== fetchGen.current) return;
+      setImageError(err instanceof Error ? err.message : "Could not remove the map picture");
     }
-  }, [replaceUrl]);
+  }, []);
+
+  const skipMapOverlay = useCallback(async () => {
+    const gen = ++fetchGen.current;
+    try {
+      const data = await skipMapOverlayRequest();
+      if (gen !== fetchGen.current) return;
+      setOverlay(data);
+      setImageError(null);
+    } catch (err) {
+      if (gen !== fetchGen.current) return;
+      setImageError(err instanceof Error ? err.message : "Could not skip the map picture");
+    }
+  }, []);
+
+  const mapImageUrl = mockMap
+    ? "/PDA.png"
+    : overlay?.status === "ready"
+      ? mapOverlayImageUrl(overlay.revision)
+      : null;
+  const canClearMapImage = overlay?.status === "skipped" || overlay?.source === "custom";
 
   return (
     <SettingsContext.Provider
       value={{
         settings,
         mapImageUrl,
+        mapImageEditable: liveMap,
+        canClearMapImage,
+        clearMapImageLabel: overlay?.status === "skipped" ? "Look for a map picture" : "Remove map picture",
+        overlayPrompt: liveMap && overlay?.status === "missing",
+        overlayDetail: overlay?.error ?? null,
         imageError,
         open,
         setOpen,
@@ -150,6 +184,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         setNotifications,
         setMapImageFile,
         resetMapImage,
+        skipMapOverlay,
       }}
     >
       {children}

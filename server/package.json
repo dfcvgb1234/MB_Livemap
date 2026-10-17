@@ -12,12 +12,16 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
+    "fflate": "^0.8.3",
     "hono": "^4.13.13",
+    "jpeg-js": "^0.4.4",
+    "pngjs": "^7.0.0",
     "qrcode": "^1.5.4",
     "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "@types/pngjs": "^6.0.5",
     "@types/qrcode": "^1.5.6",
     "@types/ws": "^8.18.2",
     "cross-env": "^10.1.0",

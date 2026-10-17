@@ -881,9 +881,9 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
             "radial-gradient(ellipse at 30% 20%, #4a6b3e 0%, transparent 50%), radial-gradient(ellipse at 70% 80%, #2f4a38 0%, transparent 45%), linear-gradient(160deg, #243222 0%, #1a2618 40%, #152018 100%)",
         }}
       />
-      {showMap && bounds.w > 0 ? (
+      {showMap && bounds.w > 0 && mapImageUrl ? (
         <MapPicture
-          url={mapImageUrl ?? "/PDA.png"}
+          url={mapImageUrl}
           view={view}
           width={bounds.w}
           height={bounds.h}

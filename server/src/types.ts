@@ -111,6 +111,12 @@ export type GameState = {
   source: "mod" | "mock";
   mapName: string | null;
   mapSize: number | null;
+  /** Mod environment name. Empty for the base-game maps. */
+  customEnvironment: string | null;
+  /** `g_currentMission.baseDirectory`. A `$pdlc` path is not a file on disk. */
+  mapDirectory: string | null;
+  /** `missionInfo.baseDirectory`, when the game reports one. */
+  missionDirectory: string | null;
   /** In-game date. Null until the mod sends one. */
   calendar: GameCalendar | null;
   vehicles: Vehicle[];
@@ -255,6 +261,9 @@ export function emptyState(source: "mod" | "mock" = "mock"): GameState {
     source,
     mapName: null,
     mapSize: 2048,
+    customEnvironment: null,
+    mapDirectory: null,
+    missionDirectory: null,
     calendar: null,
     vehicles: [],
     weather: { condition: null, temperatureC: null, hourly: null, daily: null },

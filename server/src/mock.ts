@@ -239,6 +239,9 @@ export function createMockState(t = Date.now()): GameState {
     source: "mock",
     mapName: "Riverbend Mock",
     mapSize,
+    customEnvironment: null,
+    mapDirectory: null,
+    missionDirectory: null,
     calendar: {
       period: (Math.floor(t / 24000) % 12) + 1,
       day: (Math.floor(t / 8000) % 3) + 1,

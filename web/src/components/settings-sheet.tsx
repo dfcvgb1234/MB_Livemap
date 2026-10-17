@@ -101,6 +101,9 @@ export function SettingsSheet() {
     setColor,
     resetColors,
     setNotifications,
+    mapImageEditable,
+    canClearMapImage,
+    clearMapImageLabel,
     setMapImageFile,
     resetMapImage,
   } = useSettings();
@@ -123,17 +126,25 @@ export function SettingsSheet() {
         <div className="flex flex-col gap-6 px-4 pb-6">
           <section className="flex flex-col gap-3">
             <h2 className="text-xs font-semibold tracking-[0.04em] text-[#b7b1a4] uppercase">Map image</h2>
-            <img
-              src={mapImageUrl ?? "/PDA.png"}
-              alt=""
-              className="h-28 w-full rounded-lg object-cover"
-            />
-            <label className="flex min-h-11 cursor-pointer items-center justify-center rounded-lg bg-[#e2b657] px-3 text-sm font-semibold text-[#2a2112]">
+            {mapImageUrl ? (
+              <img src={mapImageUrl} alt="" className="h-28 w-full rounded-lg object-cover" />
+            ) : (
+              <div className="grid h-28 place-items-center rounded-lg bg-black/25 text-sm text-[#b7b1a4]">
+                No map picture
+              </div>
+            )}
+            <label
+              className={cn(
+                "flex min-h-11 items-center justify-center rounded-lg bg-[#e2b657] px-3 text-sm font-semibold text-[#2a2112]",
+                mapImageEditable ? "cursor-pointer" : "pointer-events-none opacity-40",
+              )}
+            >
               Choose image
               <input
                 type="file"
-                accept="image/png,image/jpeg,image/webp"
+                accept=".dds,image/png,image/jpeg,image/webp"
                 className="sr-only"
+                disabled={!mapImageEditable}
                 onChange={(event) => {
                   const file = event.target.files?.[0];
                   event.target.value = "";
@@ -150,11 +161,11 @@ export function SettingsSheet() {
             </p>
             <button
               type="button"
-              disabled={mapImageUrl == null}
+              disabled={!canClearMapImage}
               onClick={() => void resetMapImage()}
               className="min-h-10 rounded-lg bg-white/10 px-3 text-sm font-semibold enabled:hover:bg-white/15 disabled:opacity-40"
             >
-              Use built-in map
+              {clearMapImageLabel}
             </button>
             {imageError ? <p className="text-sm text-[#d46a6a]">{imageError}</p> : null}
           </section>

@@ -23,6 +23,15 @@ export function defaultWsUrl() {
   return `${protocol}//${window.location.host || host}`;
 }
 
+export function bridgeHttpUrl() {
+  if (typeof window === "undefined") return "http://127.0.0.1:18767";
+  if (process.env.NODE_ENV === "development") {
+    const host = window.location.hostname || "127.0.0.1";
+    return `http://${host}:18767`;
+  }
+  return window.location.origin;
+}
+
 export function createCommand(
   action: WhitelistAction,
   vehicleId: string,

@@ -554,6 +554,9 @@ function StateCollector.new()
     self.cachedAnimals = {}
     self.mapName = nil
     self.mapSize = nil
+    self.customEnvironment = nil
+    self.mapDirectory = nil
+    self.missionDirectory = nil
     return self
 end
 
@@ -1777,6 +1780,29 @@ function StateCollector:refreshSlow()
         end
         return nil
     end, nil)
+    self.customEnvironment = safeCall(function()
+        local info = g_currentMission and g_currentMission.missionInfo
+        local value = info and info.customEnvironment
+        if type(value) ~= "string" or value == "" then
+            return nil
+        end
+        return value
+    end, nil)
+    self.mapDirectory = safeCall(function()
+        local value = g_currentMission and g_currentMission.baseDirectory
+        if type(value) ~= "string" or value == "" then
+            return nil
+        end
+        return value
+    end, nil)
+    self.missionDirectory = safeCall(function()
+        local info = g_currentMission and g_currentMission.missionInfo
+        local value = info and info.baseDirectory
+        if type(value) ~= "string" or value == "" then
+            return nil
+        end
+        return value
+    end, nil)
 end
 
 -- FS25 currentPeriod is 1–12 starting in March (1 = March, 11 = January, 12 = February).
@@ -1822,6 +1848,9 @@ function StateCollector:buildSnapshot()
         source = "mod",
         mapName = self.mapName,
         mapSize = self.mapSize,
+        customEnvironment = self.customEnvironment,
+        mapDirectory = self.mapDirectory,
+        missionDirectory = self.missionDirectory,
         calendar = self:collectCalendar(),
         vehicles = self:collectVehicles(),
         weather = self.cachedWeather,
