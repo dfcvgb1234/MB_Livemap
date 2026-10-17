@@ -8,7 +8,7 @@ import { LivemapProvider, useLivemapContext } from "@/components/livemap-provide
 import { MapOverlayPrompt } from "@/components/map-overlay-prompt";
 import { NotificationHistorySheet } from "@/components/notification-history-sheet";
 import { SettingsProvider, useSettings } from "@/components/settings-provider";
-import { SettingsSheet } from "@/components/settings-sheet";
+import { SettingsDialog } from "@/components/settings-dialog";
 import { NotificationProvider, ToastStack, useNotificationCenter } from "@/components/toast-stack";
 import { driverPageLabel } from "@/lib/driver-page";
 import { cn } from "@/lib/utils";
@@ -97,7 +97,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
       <div className="min-h-0 flex-1 overflow-auto [container-type:size] [overflow-anchor:none]">{children}</div>
       <ToastStack />
       <NotificationHistorySheet />
-      <SettingsSheet />
+      <SettingsDialog />
       <ConnectSheet />
       <MapOverlayPrompt />
     </div>

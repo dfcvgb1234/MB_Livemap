@@ -3,9 +3,60 @@
 LivemapBridge = {}
 LivemapBridge.__index = LivemapBridge
 
-local VEHICLE_INTERVAL_MS = 400 -- ~2.5 Hz
-local SLOW_INTERVAL_MS = 5000
-local AD_INTERVAL_MS = 2000
+-- Normal profile. Matches server/src/settingsStore.ts and web/src/lib/performance.ts.
+local NORMAL_INTERVALS = {
+    vehicles = 400,
+    weather = 5000,
+    fields = 5000,
+    productions = 5000,
+    animals = 5000,
+    autodrive = 2000,
+    courseplay = 2000,
+}
+
+local INTERVAL_LIMITS = {
+    vehicles = { min = 100, max = 5000 },
+    weather = { min = 500, max = 60000 },
+    fields = { min = 1000, max = 60000 },
+    productions = { min = 1000, max = 60000 },
+    animals = { min = 1000, max = 60000 },
+    autodrive = { min = 250, max = 30000 },
+    courseplay = { min = 500, max = 30000 },
+}
+
+local INTERVAL_GROUPS = {
+    "vehicles",
+    "weather",
+    "fields",
+    "productions",
+    "animals",
+    "autodrive",
+    "courseplay",
+}
+
+local function clampInterval(group, value)
+    local limits = INTERVAL_LIMITS[group]
+    local n = tonumber(value)
+    if n == nil then
+        return NORMAL_INTERVALS[group]
+    end
+    n = math.floor(n + 0.5)
+    if n < limits.min then
+        return limits.min
+    end
+    if n > limits.max then
+        return limits.max
+    end
+    return n
+end
+
+local function copyIntervals(source)
+    local next = {}
+    for _, group in ipairs(INTERVAL_GROUPS) do
+        next[group] = clampInterval(group, source and source[group])
+    end
+    return next
+end
 
 function LivemapBridge.new()
     local self = setmetatable({}, LivemapBridge)
@@ -14,12 +65,15 @@ function LivemapBridge.new()
     self.autoDrive = AutoDriveSync.new()
     self.courseplay = CourseplaySync.new()
     self.commands = CommandHandler.new()
-    self.vehicleAccum = 0
-    self.slowAccum = SLOW_INTERVAL_MS -- force immediate slow refresh
-    self.adAccum = 0
+    self.intervals = copyIntervals(NORMAL_INTERVALS)
+    self.accum = {}
+    for _, group in ipairs(INTERVAL_GROUPS) do
+        self.accum[group] = 0
+    end
     self.courseWatchAccum = 0
     self.courseWatchSeen = nil
     self.wasConnected = false
+    self.fullPending = true
     self.running = false
     self.updateFn = nil
 
@@ -27,7 +81,14 @@ function LivemapBridge.new()
     self.tcp.onLine = function(line)
         bridge:onLine(line)
     end
+    self.tcp.onPerformance = function(raw)
+        bridge:applyIntervals(raw)
+    end
     return self
+end
+
+function LivemapBridge:applyIntervals(raw)
+    self.intervals = copyIntervals(raw or NORMAL_INTERVALS)
 end
 
 function LivemapBridge:start()
@@ -35,6 +96,7 @@ function LivemapBridge:start()
         return
     end
     self.running = true
+    self.fullPending = true
     self.collector:refreshSlow()
 
     self.updateFn = function(dt)
@@ -134,6 +196,30 @@ function LivemapBridge:flushNotifications()
     end
 end
 
+function LivemapBridge:sendSnapshot(include)
+    if not self.tcp:isConnected() then
+        return
+    end
+    if include.weather then
+        self.collector:refreshWeather()
+    end
+    if include.fields then
+        self.collector:refreshFields()
+    end
+    if include.productions then
+        self.collector:refreshProductions()
+    end
+    if include.animals then
+        self.collector:refreshAnimals()
+    end
+    if include.weather or include.fields or include.productions or include.animals then
+        self.collector:refreshMapInfo()
+    end
+    self.collector.enabledFarmIds = self.tcp.enabledFarmIds
+    local snap = self.collector:buildSnapshot(include)
+    self.tcp:sendLine(Json.encode(snap))
+end
+
 function LivemapBridge:update(dt)
     self.tcp:update()
     self:flushNotifications()
@@ -141,23 +227,12 @@ function LivemapBridge:update(dt)
         CourseplaySync.updateHandoffs()
     end
 
-    self.vehicleAccum = self.vehicleAccum + dt
-    self.slowAccum = self.slowAccum + dt
-    self.adAccum = self.adAccum + dt
-
-    if self.slowAccum >= SLOW_INTERVAL_MS then
-        self.slowAccum = 0
-        self.collector:refreshSlow()
-    end
-
     local connected = self.tcp:isConnected()
     if connected and not self.wasConnected then
-        self:sendAutoDrive(true)
-        self:sendCourseplay(true)
+        self.fullPending = true
         if CourseplaySync ~= nil and CourseplaySync.installFinishHook ~= nil then
             CourseplaySync.installFinishHook()
         end
-        self.adAccum = 0
     end
     self.wasConnected = connected
 
@@ -170,22 +245,53 @@ function LivemapBridge:update(dt)
         end
     end
 
-    if connected and self.adAccum >= AD_INTERVAL_MS then
-        self.adAccum = 0
+    if connected and self.fullPending then
+        self.fullPending = false
+        for _, group in ipairs(INTERVAL_GROUPS) do
+            self.accum[group] = 0
+        end
+        self:sendAutoDrive(true)
+        self:sendCourseplay(true)
+        self:sendSnapshot({
+            vehicles = true,
+            weather = true,
+            fields = true,
+            productions = true,
+            animals = true,
+        })
+        if CourseplaySync ~= nil and CourseplaySync.installFinishHook ~= nil then
+            CourseplaySync.installFinishHook()
+        end
+        return
+    end
+
+    local due = {}
+    local stateDue = false
+    for _, group in ipairs(INTERVAL_GROUPS) do
+        self.accum[group] = self.accum[group] + dt
+        if self.accum[group] >= self.intervals[group] then
+            self.accum[group] = 0
+            due[group] = true
+            if group ~= "autodrive" and group ~= "courseplay" then
+                stateDue = true
+            end
+        end
+    end
+
+    if not connected then
+        return
+    end
+    if due.autodrive then
         self:sendAutoDrive(false)
+    end
+    if due.courseplay then
         self:sendCourseplay(false)
         if CourseplaySync ~= nil and CourseplaySync.installFinishHook ~= nil then
             CourseplaySync.installFinishHook()
         end
     end
-
-    if self.vehicleAccum >= VEHICLE_INTERVAL_MS then
-        self.vehicleAccum = 0
-        if self.tcp:isConnected() then
-            self.collector.enabledFarmIds = self.tcp.enabledFarmIds
-            local snap = self.collector:buildSnapshot()
-            self.tcp:sendLine(Json.encode(snap))
-        end
+    if stateDue then
+        self:sendSnapshot(due)
     end
 end
 

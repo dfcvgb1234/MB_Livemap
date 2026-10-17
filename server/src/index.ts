@@ -32,6 +32,7 @@ import {
   type StatusMessage,
 } from "./types.js";
 import { createMapOverlay } from "./mapOverlay.js";
+import { createSettingsStore } from "./settingsStore.js";
 import {
   createMockAutoDrive,
   createMockCourseplay,
@@ -66,6 +67,7 @@ const DESKTOP = STATIC_ROOT !== "";
 const WEB_PORT = Number(process.env.MB_LIVEMAP_PORT ?? 43127);
 const modInstall = installBundledMod(SETTINGS_DIR);
 const overlay = createMapOverlay(SETTINGS_DIR);
+const settingsStore = createSettingsStore(SETTINGS_DIR);
 if (modInstall.message) console.log(`[mod] ${modInstall.message}`);
 const MOCK =
   process.env.MB_LIVEMAP_MOCK === "1" ||
@@ -87,6 +89,7 @@ let modViaPipe = false;
 const pipeCommandQueue: CommandMessage[] = [];
 let mockActive = MOCK;
 let stopMock: (() => void) | null = null;
+let mockHz = 0;
 
 const webClients = new Set<WebSocket>();
 const pendingCommands = new Map<
@@ -144,6 +147,72 @@ function setState(state: GameState) {
   overlay.note(latestState);
   broadcast(latestState);
   broadcast(statusPayload());
+}
+
+const PARTIAL_KEYS = [
+  "mapName",
+  "mapSize",
+  "customEnvironment",
+  "mapDirectory",
+  "missionDirectory",
+  "calendar",
+  "vehicles",
+  "multiplayer",
+  "localFarmId",
+  "farms",
+  "players",
+  "weather",
+  "fields",
+  "productions",
+  "animals",
+] as const;
+
+const NULLABLE_KEYS = new Set<string>([
+  "mapName",
+  "mapSize",
+  "customEnvironment",
+  "mapDirectory",
+  "missionDirectory",
+  "calendar",
+  "localFarmId",
+]);
+
+function stopMockInjector() {
+  mockActive = false;
+  stopMock?.();
+  stopMock = null;
+  mockHz = 0;
+}
+
+function syncMockRate() {
+  if (!mockActive) return;
+  const hz = settingsStore.vehicleHz();
+  if (stopMock && mockHz === hz) return;
+  stopMock?.();
+  mockHz = hz;
+  stopMock = startMockInjector(setState, hz, broadcast);
+}
+
+/** Fold a partial mod snapshot into the last full state. Missing groups stay as they were. */
+function mergeModState(partial: Partial<GameState> & { ts?: number }) {
+  if (mockActive) {
+    stopMockInjector();
+    console.log("[mock] stopped — live mod connected");
+    if (autoDriveFromMock) setAutoDrive({ type: "autodrive", available: false });
+    if (courseplayFromMock) setCourseplay({ type: "courseplay", available: false });
+    mockAdOverrides.clear();
+    latestState = emptyState("mod");
+  }
+  const patch: Partial<GameState> = {};
+  for (const key of PARTIAL_KEYS) {
+    if (!Object.prototype.hasOwnProperty.call(partial, key)) continue;
+    const value = partial[key];
+    if (value === undefined) continue;
+    if (value === null && !NULLABLE_KEYS.has(key)) continue;
+    (patch as Record<string, unknown>)[key] = value;
+  }
+  const ts = typeof partial.ts === "number" ? partial.ts : Date.now();
+  setState({ ...latestState, ...patch, type: "state", source: "mod", ts });
 }
 
 function setAutoDrive(graph: AutoDriveGraph, fromMock = false) {
@@ -631,23 +700,7 @@ function handleModLine(line: string) {
   const typed = msg as { type?: string };
 
   if (typed.type === "state") {
-    const state = msg as GameState;
-    state.source = "mod";
-    if (mockActive) {
-      // Prefer live mod over mock once connected.
-      mockActive = false;
-      stopMock?.();
-      stopMock = null;
-      console.log("[mock] stopped — live mod connected");
-      if (autoDriveFromMock) {
-        setAutoDrive({ type: "autodrive", available: false });
-      }
-      if (courseplayFromMock) {
-        setCourseplay({ type: "courseplay", available: false });
-      }
-      mockAdOverrides.clear();
-    }
-    setState(state);
+    mergeModState(msg as Partial<GameState> & { ts?: number });
     return;
   }
 
@@ -856,6 +909,25 @@ app.get("/health", (c) =>
 
 app.get("/state", (c) => c.json(latestState));
 
+app.get("/api/settings", (c) => c.json(settingsStore.response()));
+
+app.put("/api/settings", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Settings could not be saved." }, 400);
+  }
+  try {
+    const saved = settingsStore.save(body);
+    syncMockRate();
+    return c.json(saved);
+  } catch (err) {
+    console.warn("[settings] save failed:", err instanceof Error ? err.message : err);
+    return c.json({ error: "Settings could not be saved." }, 500);
+  }
+});
+
 app.get("/api/map-overlay", async (c) => {
   overlay.note(latestState);
   return c.json(await overlay.status());
@@ -922,7 +994,7 @@ if (!DESKTOP || MOCK) {
     setMockMultiplayer(c.req.query("mp") === "1");
     if (!mockActive) {
       mockActive = true;
-      stopMock = startMockInjector(setState, 2, broadcast);
+      syncMockRate();
       setAutoDrive(createMockAutoDrive(), true);
       setCourseplay(createMockCourseplay(), true);
     }
@@ -931,9 +1003,7 @@ if (!DESKTOP || MOCK) {
 
   app.post("/mock/stop", (c) => {
     setMockMultiplayer(false);
-    mockActive = false;
-    stopMock?.();
-    stopMock = null;
+    stopMockInjector();
     broadcast(statusPayload());
     return c.json({ mockActive: false });
   });
@@ -960,7 +1030,8 @@ if (DESKTOP) {
 
 if (MOCK) {
   console.log("[mock] mock injector enabled");
-  stopMock = startMockInjector(setState, 2, broadcast);
+  mockActive = true;
+  syncMockRate();
 }
 
 console.log(

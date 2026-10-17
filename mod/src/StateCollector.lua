@@ -2484,11 +2484,7 @@ function StateCollector:collectAnimals()
     return animals
 end
 
-function StateCollector:refreshSlow()
-    self.cachedWeather = self:collectWeather()
-    self.cachedFields = self:collectFields()
-    self.cachedProductions = self:collectProductions()
-    self.cachedAnimals = self:collectAnimals()
+function StateCollector:refreshMapInfo()
     self.mapName = safeCall(function()
         return g_currentMission and g_currentMission.missionInfo and g_currentMission.missionInfo.mapTitle
     end, nil)
@@ -2521,6 +2517,30 @@ function StateCollector:refreshSlow()
         end
         return value
     end, nil)
+end
+
+function StateCollector:refreshWeather()
+    self.cachedWeather = self:collectWeather()
+end
+
+function StateCollector:refreshFields()
+    self.cachedFields = self:collectFields()
+end
+
+function StateCollector:refreshProductions()
+    self.cachedProductions = self:collectProductions()
+end
+
+function StateCollector:refreshAnimals()
+    self.cachedAnimals = self:collectAnimals()
+end
+
+function StateCollector:refreshSlow()
+    self:refreshMapInfo()
+    self:refreshWeather()
+    self:refreshFields()
+    self:refreshProductions()
+    self:refreshAnimals()
 end
 
 -- FS25 currentPeriod is 1–12 starting in March (1 = March, 11 = January, 12 = February).
@@ -2559,7 +2579,8 @@ function StateCollector:collectCalendar()
     end, nil)
 end
 
-function StateCollector:buildSnapshot()
+function StateCollector:buildSnapshot(include)
+    local everything = include == nil
     local snapshot = {
         type = "state",
         ts = math.floor((g_time or (os.clock() * 1000))),
@@ -2569,18 +2590,28 @@ function StateCollector:buildSnapshot()
         customEnvironment = self.customEnvironment,
         mapDirectory = self.mapDirectory,
         missionDirectory = self.missionDirectory,
-        calendar = self:collectCalendar(),
-        vehicles = self:collectVehicles(),
-        weather = self.cachedWeather,
-        fields = self.cachedFields,
-        productions = self.cachedProductions,
-        animals = self.cachedAnimals,
     }
-    if isHostedMultiplayer() then
-        snapshot.multiplayer = true
-        snapshot.localFarmId = localFarmId()
-        snapshot.farms = collectFarms()
-        snapshot.players = collectPlayers()
+    if everything or include.vehicles then
+        snapshot.calendar = self:collectCalendar()
+        snapshot.vehicles = self:collectVehicles()
+        if isHostedMultiplayer() then
+            snapshot.multiplayer = true
+            snapshot.localFarmId = localFarmId()
+            snapshot.farms = collectFarms()
+            snapshot.players = collectPlayers()
+        end
+    end
+    if everything or include.weather then
+        snapshot.weather = self.cachedWeather
+    end
+    if everything or include.fields then
+        snapshot.fields = self.cachedFields
+    end
+    if everything or include.productions then
+        snapshot.productions = self.cachedProductions
+    end
+    if everything or include.animals then
+        snapshot.animals = self.cachedAnimals
     end
     return snapshot
 end

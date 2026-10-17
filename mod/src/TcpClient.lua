@@ -12,6 +12,7 @@ local PIPE_PATH = "\\\\.\\pipe\\mb-livemap"
 local RECONNECT_INTERVAL_MS = 3000
 local COMMAND_POLL_MS = 200
 local SESSION_POLL_MS = 2000
+local PERFORMANCE_POLL_MS = 1000
 
 local function tryRequireSocket()
     local ok, sock = pcall(function()
@@ -42,9 +43,13 @@ function TcpClient.new(host, port)
     self.commandPath = nil
     self.sessionPath = nil
     self.farmFilterPath = nil
+    self.performancePath = nil
     self.enabledFarmIds = nil
     self.lastFarmPoll = 0
+    self.lastPerformancePoll = 0
     self.farmFilterSignature = nil
+    self.performanceSignature = nil
+    self.onPerformance = nil
     self:initCommandFiles()
     return self
 end
@@ -68,6 +73,7 @@ function TcpClient:initCommandFiles()
     self.commandPath = dir .. "commands.xml"
     self.sessionPath = dir .. "session.xml"
     self.farmFilterPath = dir .. "farms.xml"
+    self.performancePath = dir .. "performance.xml"
     self.courseWatchPath = dir .. "coursewatch.txt"
     if deleteFile ~= nil and fileExists ~= nil and fileExists(self.commandPath) then
         pcall(deleteFile, self.commandPath)
@@ -252,6 +258,62 @@ function TcpClient:pollFarmFilter()
     self.enabledFarmIds = enabled
 end
 
+function TcpClient:pollPerformance()
+    if self.performancePath == nil or XMLFile == nil then
+        return
+    end
+    local now = g_time or 0
+    if now - self.lastPerformancePoll < PERFORMANCE_POLL_MS then
+        return
+    end
+    self.lastPerformancePoll = now
+
+    local xmlFile = nil
+    local ok = pcall(function()
+        xmlFile = XMLFile.loadIfExists("mbLivemapPerformance", self.performancePath)
+    end)
+    if not ok or xmlFile == nil then
+        if self.performanceSignature ~= "" then
+            self.performanceSignature = ""
+            if self.onPerformance ~= nil then
+                self.onPerformance(nil)
+            end
+        end
+        return
+    end
+
+    local raw = {}
+    pcall(function()
+        raw.vehicles = xmlFile:getString("performance#vehicles")
+        raw.weather = xmlFile:getString("performance#weather")
+        raw.fields = xmlFile:getString("performance#fields")
+        raw.productions = xmlFile:getString("performance#productions")
+        raw.animals = xmlFile:getString("performance#animals")
+        raw.autodrive = xmlFile:getString("performance#autodrive")
+        raw.courseplay = xmlFile:getString("performance#courseplay")
+    end)
+    pcall(function()
+        xmlFile:delete()
+    end)
+
+    local signature = table.concat({
+        tostring(raw.vehicles),
+        tostring(raw.weather),
+        tostring(raw.fields),
+        tostring(raw.productions),
+        tostring(raw.animals),
+        tostring(raw.autodrive),
+        tostring(raw.courseplay),
+    }, ",")
+    if signature == self.performanceSignature then
+        return
+    end
+    self.performanceSignature = signature
+    if self.onPerformance ~= nil then
+        self.onPerformance(raw)
+    end
+end
+
 function TcpClient:pollCommand()
     if self.commandPath == nil or self.onLine == nil or XMLFile == nil then
         return
@@ -331,6 +393,7 @@ function TcpClient:updatePipe()
 end
 
 function TcpClient:update()
+    self:pollPerformance()
     if self.socketLib == nil then
         self:updatePipe()
         return

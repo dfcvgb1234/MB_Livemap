@@ -1,4 +1,5 @@
 import { DEFAULT_COLORS, MACHINE_COLOR_KEYS, type MachineColors } from "./machine-colors";
+import { DEFAULT_PERFORMANCE, type PerformanceSettings } from "./performance";
 
 export type MapImageFit = "pda" | "full";
 
@@ -38,9 +39,11 @@ export type NotificationSettings = {
 };
 
 export type AppSettings = {
+  version: 1;
   mapImageFit: MapImageFit;
   colors: MachineColors;
   notifications: NotificationSettings;
+  performance: PerformanceSettings;
 };
 
 export const DEFAULT_MANUAL_DISMISS: Record<NotificationChannel, boolean> = {
@@ -68,9 +71,11 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  version: 1,
   mapImageFit: "pda",
   colors: { ...DEFAULT_COLORS },
-  notifications: { ...DEFAULT_NOTIFICATIONS },
+  notifications: { ...DEFAULT_NOTIFICATIONS, manualDismiss: { ...DEFAULT_MANUAL_DISMISS } },
+  performance: { activeId: DEFAULT_PERFORMANCE.activeId, custom: [] },
 };
 
 const STORAGE_KEY = "mb-livemap-settings";
@@ -114,11 +119,12 @@ function sanitizeNotifications(value: unknown): NotificationSettings {
   return notifications;
 }
 
-export function loadSettings(): AppSettings {
-  if (typeof window === "undefined") return DEFAULT_SETTINGS;
+/** Browser settings from before they were stored on this PC. Null when there is nothing to copy. */
+export function readLegacySettings(): Pick<AppSettings, "mapImageFit" | "colors" | "notifications"> | null {
+  if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_SETTINGS;
+    if (!raw) return null;
     const parsed = JSON.parse(raw) as { mapImageFit?: unknown; colors?: unknown; notifications?: unknown };
     return {
       mapImageFit: parsed.mapImageFit === "full" ? "full" : "pda",
@@ -126,11 +132,11 @@ export function loadSettings(): AppSettings {
       notifications: sanitizeNotifications(parsed.notifications),
     };
   } catch {
-    return DEFAULT_SETTINGS;
+    return null;
   }
 }
 
-export function saveSettings(settings: AppSettings) {
+export function clearLegacySettings() {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+  window.localStorage.removeItem(STORAGE_KEY);
 }

@@ -12,9 +12,20 @@ import {
 } from "@/lib/map-overlay";
 import { DEFAULT_COLORS, type MachineColorKey } from "@/lib/machine-colors";
 import {
+  BUILTIN_PROFILES,
+  MAX_CUSTOM_PROFILES,
+  NORMAL_INTERVALS,
+  SETTINGS_GROUPS,
+  nextCustomName,
+  type PerformanceProfile,
+  type SettingsGroupInfo,
+  type UpdateGroup,
+} from "@/lib/performance";
+import { fetchSettings, saveSettings as saveSettingsApi, type SettingsPayload } from "@/lib/settings-api";
+import {
   DEFAULT_SETTINGS,
-  loadSettings,
-  saveSettings,
+  clearLegacySettings,
+  readLegacySettings,
   type AppSettings,
   type MapImageFit,
   type NotificationSettings,
@@ -22,6 +33,8 @@ import {
 
 type SettingsContextValue = {
   settings: AppSettings;
+  builtins: PerformanceProfile[];
+  groups: SettingsGroupInfo[];
   mapImageUrl: string | null;
   mapImageEditable: boolean;
   canClearMapImage: boolean;
@@ -29,6 +42,7 @@ type SettingsContextValue = {
   overlayPrompt: boolean;
   overlayDetail: string | null;
   imageError: string | null;
+  saveError: string | null;
   open: boolean;
   setOpen: (open: boolean) => void;
   ready: boolean;
@@ -36,6 +50,12 @@ type SettingsContextValue = {
   setColor: (key: MachineColorKey, hex: string) => void;
   resetColors: () => void;
   setNotifications: (patch: Partial<NotificationSettings>) => void;
+  setActiveProfile: (id: string) => void;
+  createProfile: () => void;
+  renameProfile: (id: string, name: string) => void;
+  deleteProfile: (id: string) => void;
+  setProfileInterval: (id: string, group: UpdateGroup, ms: number) => void;
+  retrySave: () => void;
   setMapImageFile: (file: File) => Promise<void>;
   resetMapImage: () => Promise<void>;
   skipMapOverlay: () => Promise<void>;
@@ -46,21 +66,111 @@ const SettingsContext = createContext<SettingsContextValue | null>(null);
 export function SettingsProvider({ children }: { children: ReactNode }) {
   const { state } = useLivemapContext();
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
+  const [builtins, setBuiltins] = useState<PerformanceProfile[]>(BUILTIN_PROFILES);
+  const [groups, setGroups] = useState<SettingsGroupInfo[]>(SETTINGS_GROUPS);
   const [overlay, setOverlay] = useState<MapOverlayStatus | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [ready, setReady] = useState(false);
   const settingsRef = useRef(settings);
+  const readyRef = useRef(false);
   const fetchGen = useRef(0);
+  const saveGen = useRef(0);
+  const pendingRef = useRef<AppSettings | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chainRef = useRef(Promise.resolve());
   const liveMap = state?.source === "mod" && !!state.mapName;
   const mockMap = state?.source === "mock";
 
-  useEffect(() => {
-    const loaded = loadSettings();
-    settingsRef.current = loaded;
-    setSettings(loaded);
-    setReady(true);
+  const applyPayload = useCallback((payload: SettingsPayload) => {
+    if (pendingRef.current) return;
+    settingsRef.current = payload.settings;
+    setSettings(payload.settings);
+    setBuiltins(payload.builtins);
+    setGroups(payload.groups);
+    setSaveError(null);
   }, []);
+
+  const loadFromServer = useCallback(async () => {
+    const payload = await fetchSettings();
+    if (payload.fresh) {
+      const legacy = readLegacySettings();
+      if (legacy) {
+        const saved = await saveSettingsApi({
+          ...payload.settings,
+          mapImageFit: legacy.mapImageFit,
+          colors: legacy.colors,
+          notifications: legacy.notifications,
+        });
+        clearLegacySettings();
+        applyPayload(saved);
+        return;
+      }
+    }
+    applyPayload(payload);
+  }, [applyPayload]);
+
+  const flush = useCallback((snapshot: AppSettings) => {
+    const id = ++saveGen.current;
+    chainRef.current = chainRef.current.then(async () => {
+      if (pendingRef.current !== snapshot) return;
+      try {
+        const saved = await saveSettingsApi(snapshot);
+        if (id !== saveGen.current || pendingRef.current !== snapshot) return;
+        pendingRef.current = null;
+        applyPayload(saved);
+      } catch {
+        if (id !== saveGen.current) return;
+        setSaveError("Settings could not be saved.");
+      }
+    });
+  }, [applyPayload]);
+
+  const commit = useCallback(
+    (updater: (current: AppSettings) => AppSettings) => {
+      if (!readyRef.current) return;
+      const next = updater(settingsRef.current);
+      settingsRef.current = next;
+      pendingRef.current = next;
+      setSettings(next);
+      if (timerRef.current) clearTimeout(timerRef.current);
+      timerRef.current = setTimeout(() => {
+        const snapshot = pendingRef.current;
+        if (snapshot) flush(snapshot);
+      }, 250);
+    },
+    [flush],
+  );
+
+  const retrySave = useCallback(() => {
+    if (pendingRef.current) {
+      flush(pendingRef.current);
+      return;
+    }
+    void loadFromServer().catch(() => {
+      setSaveError("Settings could not be loaded. Start the livemap server, then open settings again.");
+    });
+  }, [flush, loadFromServer]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadFromServer()
+      .catch(() => {
+        if (!cancelled) {
+          setSaveError("Settings could not be loaded. Start the livemap server, then open settings again.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          readyRef.current = true;
+          setReady(true);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [loadFromServer]);
 
   useEffect(() => {
     if (!liveMap) {
@@ -86,13 +196,6 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     };
   }, [liveMap, state?.mapName, state?.customEnvironment, state?.mapDirectory, state?.missionDirectory]);
 
-  const commit = useCallback((updater: (current: AppSettings) => AppSettings) => {
-    const next = updater(settingsRef.current);
-    settingsRef.current = next;
-    setSettings(next);
-    saveSettings(next);
-  }, []);
-
   const setMapImageFit = useCallback(
     (fit: MapImageFit) => {
       commit((current) => ({ ...current, mapImageFit: fit }));
@@ -114,6 +217,80 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
   const setNotifications = useCallback(
     (patch: Partial<NotificationSettings>) => {
       commit((current) => ({ ...current, notifications: { ...current.notifications, ...patch } }));
+    },
+    [commit],
+  );
+
+  const setActiveProfile = useCallback(
+    (id: string) => {
+      commit((current) => ({ ...current, performance: { ...current.performance, activeId: id } }));
+    },
+    [commit],
+  );
+
+  const createProfile = useCallback(() => {
+    commit((current) => {
+      if (current.performance.custom.length >= MAX_CUSTOM_PROFILES) return current;
+      const builtin = builtins.find((profile) => profile.id === current.performance.activeId);
+      const customSource = current.performance.custom.find((profile) => profile.id === current.performance.activeId);
+      const source = builtin?.intervalsMs ?? customSource?.intervalsMs ?? NORMAL_INTERVALS;
+      const id = crypto.randomUUID();
+      return {
+        ...current,
+        performance: {
+          activeId: id,
+          custom: [
+            ...current.performance.custom,
+            {
+              id,
+              name: nextCustomName(current.performance.custom.map((profile) => profile.name)),
+              intervalsMs: { ...source },
+            },
+          ],
+        },
+      };
+    });
+  }, [builtins, commit]);
+
+  const renameProfile = useCallback(
+    (id: string, name: string) => {
+      const trimmed = name.trim().slice(0, 40);
+      if (!trimmed) return;
+      commit((current) => ({
+        ...current,
+        performance: {
+          ...current.performance,
+          custom: current.performance.custom.map((profile) => (profile.id === id ? { ...profile, name: trimmed } : profile)),
+        },
+      }));
+    },
+    [commit],
+  );
+
+  const deleteProfile = useCallback(
+    (id: string) => {
+      commit((current) => ({
+        ...current,
+        performance: {
+          activeId: current.performance.activeId === id ? "normal" : current.performance.activeId,
+          custom: current.performance.custom.filter((profile) => profile.id !== id),
+        },
+      }));
+    },
+    [commit],
+  );
+
+  const setProfileInterval = useCallback(
+    (id: string, group: UpdateGroup, ms: number) => {
+      commit((current) => ({
+        ...current,
+        performance: {
+          ...current.performance,
+          custom: current.performance.custom.map((profile) =>
+            profile.id === id ? { ...profile, intervalsMs: { ...profile.intervalsMs, [group]: ms } } : profile,
+          ),
+        },
+      }));
     },
     [commit],
   );
@@ -168,6 +345,8 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
     <SettingsContext.Provider
       value={{
         settings,
+        builtins,
+        groups,
         mapImageUrl,
         mapImageEditable: liveMap,
         canClearMapImage,
@@ -175,6 +354,7 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         overlayPrompt: liveMap && overlay?.status === "missing",
         overlayDetail: overlay?.error ?? null,
         imageError,
+        saveError,
         open,
         setOpen,
         ready,
@@ -182,6 +362,12 @@ export function SettingsProvider({ children }: { children: ReactNode }) {
         setColor,
         resetColors,
         setNotifications,
+        setActiveProfile,
+        createProfile,
+        renameProfile,
+        deleteProfile,
+        setProfileInterval,
+        retrySave,
         setMapImageFile,
         resetMapImage,
         skipMapOverlay,
