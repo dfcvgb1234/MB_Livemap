@@ -1,4 +1,4 @@
-; Build with BuildRelease.ps1, which calls ISCC when Inno Setup 6 is installed.
+; Build with release\BuildRelease.ps1, which calls ISCC when Inno Setup 6 is installed.
 ; The portable folder in release\out works without this installer.
 
 #ifndef MyAppVersion
@@ -13,7 +13,7 @@ AppPublisher=MB Livemap
 DefaultDirName={localappdata}\MB Livemap
 DefaultGroupName=MB Livemap
 DisableProgramGroupPage=yes
-OutputDir=..\release\out
+OutputDir=..\out
 OutputBaseFilename=MB-Livemap-Setup
 Compression=lzma2
 SolidCompression=yes
@@ -24,7 +24,7 @@ ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\runtime\node.exe
 
 [Files]
-Source: "..\release\out\MB Livemap\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\out\MB Livemap\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\MB Livemap"; Filename: "{app}\MB Livemap.exe"

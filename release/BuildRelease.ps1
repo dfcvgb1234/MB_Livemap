@@ -3,7 +3,7 @@
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
-$Root = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Root = Split-Path -Parent $PSScriptRoot
 Set-Location $Root
 
 function Assert-Exit([string]$What) {
@@ -57,7 +57,7 @@ Pop-Location
 
 Copy-Item (Join-Path $Root "server\dist\bridge.cjs") (Join-Path $dest "app\bridge.cjs")
 Copy-Item (Join-Path $Root "web\out\*") (Join-Path $dest "app\web") -Recurse
-Copy-Item (Join-Path $Root "packaging\*") $dest -Exclude "Launcher.cs"
+Copy-Item (Join-Path $PSScriptRoot "packaging\*") $dest -Exclude "Launcher.cs"
 $csc = @(
   "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
   "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
@@ -65,7 +65,7 @@ $csc = @(
 if (-not $csc) {
   throw "The Windows C# compiler was not found, so MB Livemap.exe could not be built."
 }
-& $csc /nologo /target:winexe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/out:$(Join-Path $dest 'MB Livemap.exe')" (Join-Path $Root "packaging\Launcher.cs")
+& $csc /nologo /target:winexe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/out:$(Join-Path $dest 'MB Livemap.exe')" (Join-Path $PSScriptRoot "packaging\Launcher.cs")
 Assert-Exit "launcher"
 Set-Content -Path (Join-Path $dest "app\version.txt") -Value $version -Encoding ascii
 
@@ -98,7 +98,7 @@ $iscc = @(
 
 if ($iscc) {
   Write-Host "Building the installer..."
-  & $iscc "/DMyAppVersion=$version" (Join-Path $Root "installer\MBLivemap.iss")
+  & $iscc "/DMyAppVersion=$version" (Join-Path $PSScriptRoot "installer\MBLivemap.iss")
   Assert-Exit "installer"
 } else {
   Write-Host "Inno Setup 6 is not installed, so the portable folder is the package."

@@ -8,10 +8,13 @@ import { AnimalCards, ProductionCards } from "@/components/farm-cards";
 import { VehicleSheet } from "@/components/vehicle-sheet";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { useLivemapContext } from "@/components/livemap-provider";
+import { driverPageLabel } from "@/lib/driver-page";
 import type { Vehicle } from "@/lib/types";
 
 export default function HomePage() {
-  const { state, connection, bridgeStatus, error, sendCommand, lastResult, focus } = useLivemapContext();
+  const { state, autoDrive, courseplay, connection, bridgeStatus, error, sendCommand, lastResult, focus } =
+    useLivemapContext();
+  const driverLabel = driverPageLabel(autoDrive?.available === true, courseplay?.available === true);
   const [selected, setSelected] = useState<Vehicle | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -44,6 +47,7 @@ export default function HomePage() {
         <ConnectionBanner connection={connection} bridgeStatus={bridgeStatus} error={error} />
         <VehicleSheet
           embedded
+          driverLabel={driverLabel}
           vehicle={liveSelected}
           open={false}
           onOpenChange={() => {}}

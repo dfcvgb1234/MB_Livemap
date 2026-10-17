@@ -8,6 +8,47 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 
+const VEHICLE_SCROLL_MS = 180;
+
+function scrollableParent(element: HTMLElement): HTMLElement | null {
+  let node = element.parentElement;
+  while (node != null) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight + 1) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  const root = document.scrollingElement;
+  if (root instanceof HTMLElement && root.scrollHeight > root.clientHeight + 1) return root;
+  return null;
+}
+
+function smoothScrollIntoView(element: HTMLElement, durationMs: number): () => void {
+  let frame = 0;
+  const cancel = () => cancelAnimationFrame(frame);
+  const parent = scrollableParent(element);
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (parent == null || reduceMotion) {
+    element.scrollIntoView({ block: "start" });
+    return cancel;
+  }
+  const target =
+    parent.scrollTop + (element.getBoundingClientRect().top - parent.getBoundingClientRect().top);
+  const start = parent.scrollTop;
+  const delta = target - start;
+  if (Math.abs(delta) < 1) return cancel;
+  const started = performance.now();
+  const tick = (now: number) => {
+    const progress = Math.min(1, (now - started) / durationMs);
+    const eased = 1 - (1 - progress) * (1 - progress);
+    parent.scrollTop = start + delta * eased;
+    if (progress < 1) frame = requestAnimationFrame(tick);
+  };
+  frame = requestAnimationFrame(tick);
+  return cancel;
+}
+
 function formatAmount(value: number | null) {
   if (value == null) return "—";
   const rounded = Math.abs(value) >= 100 ? Math.round(value) : Math.round(value * 10) / 10;
@@ -292,6 +333,10 @@ type Props = {
   embedded?: boolean;
   /** livemap links across. autodrive starts and stops a drive. */
   mode?: "livemap" | "autodrive";
+  /** Header label for the driver page. The livemap link is hidden when this is empty. */
+  driverLabel?: string | null;
+  /** AutoDrive network is loaded. Hides route controls when it is not. */
+  autoDriveAvailable?: boolean;
   markers?: AutoDriveMarker[];
   courseplayAvailable?: boolean;
   courseId?: string;
@@ -307,6 +352,8 @@ export function VehicleSheet({
   lastResult,
   embedded = false,
   mode = "livemap",
+  driverLabel = null,
+  autoDriveAvailable = false,
   markers = [],
   courseplayAvailable = false,
   courseId = "",
@@ -346,7 +393,9 @@ export function VehicleSheet({
 
   useEffect(() => {
     if (!embedded || vehicle == null) return;
-    cardRef.current?.scrollIntoView({ block: "start" });
+    const card = cardRef.current;
+    if (card == null) return;
+    return smoothScrollIntoView(card, VEHICLE_SCROLL_MS);
   }, [embedded, vehicle?.id]);
 
   useEffect(() => {
@@ -485,15 +534,15 @@ export function VehicleSheet({
         </Button>
       </div>
       )}
-      {drivable && mode === "livemap" ? (
+      {drivable && mode === "livemap" && driverLabel ? (
         <Link
           href={`/autodrive?vehicle=${encodeURIComponent(vehicle.id)}`}
-          className="mt-3 flex min-h-12 items-center justify-center rounded-lg bg-[#e2b657] px-4 text-sm font-semibold text-[#2a2112] hover:bg-[#ebc56f]"
+          className="mt-3 flex min-h-12 items-center justify-center rounded-lg bg-[#e2b657] px-4 text-center text-sm font-semibold text-[#2a2112] hover:bg-[#ebc56f]"
         >
-          Open in AutoDrive
+          Open in {driverLabel}
         </Link>
       ) : null}
-      {drivable && mode === "autodrive" ? (
+      {drivable && mode === "autodrive" && autoDriveAvailable ? (
         <AutoDriveControls
           vehicle={vehicle}
           destinations={destinations}

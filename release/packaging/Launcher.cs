@@ -95,7 +95,7 @@ namespace MBLivemap
             statusLabel.Location = new Point(24, 54);
 
             detailLabel = new Label();
-            detailLabel.Text = "Windows may ask permission so an iPad can connect.";
+            detailLabel.Text = "Windows may ask permission so a tablet can connect.";
             detailLabel.Location = new Point(24, 86);
             detailLabel.Size = new Size(392, 44);
 

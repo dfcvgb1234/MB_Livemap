@@ -70,28 +70,29 @@ export function AutoDrivePage() {
       >
         <Livemap
           state={state}
-          autoDrive={autoDrive}
+          autoDrive={networkReady ? autoDrive : null}
           selectedId={liveSelected?.id}
           onSelectVehicle={setSelected}
         />
       </MapSlot>
       <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1536px]:overflow-auto min-[1536px]:border-t-0 min-[1536px]:border-l">
         <ConnectionBanner connection={connection} bridgeStatus={bridgeStatus} error={error} />
-        <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5">
-          <h2 className="text-[15px] font-semibold tracking-[0.04em] uppercase">AutoDrive</h2>
-          <p className="mt-1 text-[13px] text-[#b7b1a4]">
-            {networkReady
-              ? `${waypointCount} waypoints · ${markerCount} destinations`
-              : "AutoDrive network is not available. Load a save with AutoDrive running."}
-          </p>
-          {liveSelected == null ? (
-            <p className="mt-2 text-[13px] text-[#f3efe4]">
-              Select a vehicle on the map, then choose a destination.
+        {networkReady ? (
+          <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5">
+            <h2 className="text-[15px] font-semibold tracking-[0.04em] uppercase">AutoDrive</h2>
+            <p className="mt-1 text-[13px] text-[#b7b1a4]">
+              {waypointCount} waypoints · {markerCount} destinations
             </p>
-          ) : null}
-        </section>
+            {liveSelected == null ? (
+              <p className="mt-2 text-[13px] text-[#f3efe4]">
+                Select a vehicle on the map, then choose a destination.
+              </p>
+            ) : null}
+          </section>
+        ) : null}
         <CourseplayCard
           available={courseplayReady}
+          autoDriveAvailable={networkReady}
           courses={courses}
           vehicle={liveSelected}
           courseId={courseId}
@@ -106,7 +107,8 @@ export function AutoDrivePage() {
         <VehicleSheet
           embedded
           mode="autodrive"
-          markers={autoDrive?.markers ?? []}
+          autoDriveAvailable={networkReady}
+          markers={networkReady ? (autoDrive?.markers ?? []) : []}
           courseplayAvailable={networkReady && courseplayReady}
           courseId={courseId}
           cpLane={lanes.length > 0 ? activeLane : undefined}

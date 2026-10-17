@@ -13,5 +13,5 @@ release/out/
 release/cache/
 *.tsbuildinfo
 .cursor/
-Examples/
+examples/
 *.zip

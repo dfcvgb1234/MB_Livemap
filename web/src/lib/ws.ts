@@ -17,7 +17,7 @@ export function defaultWsUrl() {
   if (fromEnv) return fromEnv;
   const host = window.location.hostname || "127.0.0.1";
   // `next dev` keeps the socket on 18766. The packaged app serves the page
-  // and the socket on the same port, so an iPad follows the address it opened.
+  // and the socket on the same port, so a tablet follows the address it opened.
   if (process.env.NODE_ENV === "development") return `ws://${host}:18766`;
   const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host || host}`;

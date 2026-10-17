@@ -31,16 +31,16 @@ Open **[http://127.0.0.1:43127](http://127.0.0.1:43127)**.
 
 ## Install for someone else
 
-On a Windows PC, double-click `BuildRelease.ps1` (or run it from PowerShell). It writes `release\out\MB Livemap\`. Copy that folder to the player’s PC. They double-click **MB Livemap**. A window stays open while it is running, and the icon also appears by the clock. The first start copies `FS25_MB_Livemap.zip` into the Farming Simulator mods folder and opens the dashboard. They enable **MB Livemap Bridge** once in the mod list. Closing the window stops it.
+On a Windows PC, double-click `release\BuildRelease.ps1` (or run it from PowerShell). It writes `release\out\MB Livemap\`. Copy that folder to the player’s PC. They double-click **MB Livemap**. A window stays open while it is running, and the icon also appears by the clock. The first start copies `FS25_MB_Livemap.zip` into the Farming Simulator mods folder and opens the dashboard. They enable **MB Livemap Bridge** once in the mod list. Closing the window stops it.
 
 If [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed, the same script also writes `release\out\MB-Livemap-Setup.exe`.
 
-`StartLivemap.bat` is the developer launcher. It still needs Node.js and runs the live dev servers.
+`release\StartLivemap.bat` is the developer launcher. It still needs Node.js and runs the live dev servers.
 
 ## Install the FS25 mod by hand
 
-1. Run `CreateMod.bat` and copy `FS25_MB_Livemap.zip` to `%USERPROFILE%\Documents\My Games\FarmingSimulator2025\mods\`.
-2. Double-click `StartLivemap.bat` before you load a save. It starts the bridge and the dashboard, then opens http://127.0.0.1:43127. Leave those two windows open while you play.
+1. Run `release\CreateMod.bat` and copy `release\FS25_MB_Livemap.zip` to `%USERPROFILE%\Documents\My Games\FarmingSimulator2025\mods\`.
+2. Double-click `release\StartLivemap.bat` before you load a save. It starts the bridge and the dashboard, then opens http://127.0.0.1:43127. Leave those two windows open while you play.
 3. Enable **MB Livemap Bridge** in the mod selection screen and load a savegame.
 
 See `mod/README.md` for protocol notes. The game must be restarted after updating the mod zip.
@@ -52,6 +52,8 @@ See `mod/README.md` for protocol notes. The game must be restarted after updatin
 | `mod/` | FS25 Lua mod — snapshots + whitelisted commands |
 | `server/` | Named-pipe ↔ WebSocket bridge, state cache, mock injector |
 | `web/` | Next.js tablet UI (home livemap, productions, animals) |
+| `examples/` | Reference mods used while building this one |
+| `release/` | Installer script, player packaging, and built packages |
 
 ## Commands (whitelist)
 

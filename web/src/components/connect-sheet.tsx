@@ -78,7 +78,7 @@ export function ConnectButton() {
   return (
     <button
       type="button"
-      aria-label="Connect an iPad"
+      aria-label="Connect a tablet"
       onClick={() => setOpen(true)}
       className="grid size-10 place-items-center rounded-lg text-[#f3efe4] hover:bg-white/10"
     >
@@ -103,9 +103,9 @@ export function ConnectSheet() {
         className="w-full overflow-y-auto border-white/10 bg-[#221e18] text-[#f3efe4] sm:max-w-md"
       >
         <SheetHeader className="pr-10">
-          <SheetTitle className="text-lg text-[#f3efe4]">Use it on an iPad</SheetTitle>
+          <SheetTitle className="text-lg text-[#f3efe4]">Use it on a tablet</SheetTitle>
           <SheetDescription className="text-[#b7b1a4]">
-            The iPad and this PC have to be on the same Wi-Fi. Scan a code with the iPad camera.
+            The tablet and this PC have to be on the same Wi-Fi. Scan a code with the tablet camera.
           </SheetDescription>
         </SheetHeader>
         <div className="flex flex-col gap-5 px-4 pb-6">
@@ -128,7 +128,7 @@ export function ConnectSheet() {
             </p>
           )}
           <p className="text-xs text-[#b7b1a4]">
-            If the iPad cannot open the page, set this PC&apos;s Wi-Fi to a private network. In Windows
+            If the tablet cannot open the page, set this PC&apos;s Wi-Fi to a private network. In Windows
             Settings, open Network and internet, Wi-Fi, the network name, then choose Private.
           </p>
         </div>

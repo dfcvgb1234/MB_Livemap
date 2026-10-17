@@ -23,7 +23,7 @@ const TYPES: Record<string, string> = {
   ".woff2": "font/woff2",
 };
 
-/** Skip virtual and VPN adapters so the iPad QR uses the home Wi-Fi address. */
+/** Skip virtual and VPN adapters so the tablet QR uses the home Wi-Fi address. */
 const SKIP_ADAPTER = /WSL|Nord|VPN|vEthernet|Hyper-V|Virtual|VMware|VirtualBox|Docker|Tailscale|ZeroTier|Loopback/i;
 
 export function lanAddresses(): string[] {

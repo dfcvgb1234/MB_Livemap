@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { CommandResult, CourseplayCourse, CourseplayStart, Vehicle, WhitelistAction } from "@/lib/types";
+import type { AutoDriveMode, CommandResult, CourseplayCourse, CourseplayStart, Vehicle, WhitelistAction } from "@/lib/types";
 import { courseLanes, type CourseLane } from "@/lib/course-lanes";
 import { Button } from "@/components/ui/button";
 
@@ -9,6 +9,8 @@ const SELECT_CLASS = "mt-1 min-h-12 w-full rounded-lg border border-white/15 bg-
 
 type Props = {
   available: boolean;
+  /** Both mods are loaded, so a vehicle can drive to the course and then start it. */
+  autoDriveAvailable?: boolean;
   courses: CourseplayCourse[];
   vehicle: Vehicle | null;
   courseId: string;
@@ -21,13 +23,14 @@ type Props = {
     action: WhitelistAction,
     vehicleId: string,
     targetId?: string,
-    extra?: { cpStart?: CourseplayStart; cpLane?: number },
+    extra?: { mode?: AutoDriveMode; cpStart?: CourseplayStart; cpLane?: number },
   ) => string;
   lastResult: CommandResult | null;
 };
 
 export function CourseplayCard({
   available,
+  autoDriveAvailable = false,
   courses,
   vehicle,
   courseId,
@@ -60,6 +63,18 @@ export function CourseplayCard({
       onCommand(action, vehicle.id, selected?.id, {
         cpStart: action === "courseplay.start" ? startAt : undefined,
         cpLane: action === "courseplay.start" && lanes.length > 0 ? lane : undefined,
+      }),
+    );
+  };
+
+  const driveToCourse = () => {
+    if (!vehicle || selected == null) return;
+    setFeedback("Driving to the course…");
+    setPendingId(
+      onCommand("autodrive.start", vehicle.id, selected.id, {
+        mode: "fieldwork",
+        cpStart: startAt,
+        cpLane: lanes.length > 0 ? lane : undefined,
       }),
     );
   };
@@ -155,6 +170,22 @@ export function CourseplayCard({
             >
               Stop Courseplay
             </Button>
+            {autoDriveAvailable ? (
+              <Button
+                size="lg"
+                className="col-span-2 min-h-12 bg-[#e2b657] text-[#2a2112] hover:bg-[#ebc56f]"
+                disabled={
+                  !!pendingId ||
+                  !ready ||
+                  vehicle?.adCapable !== true ||
+                  vehicle?.cpActive === true ||
+                  vehicle?.adActive === true
+                }
+                onClick={driveToCourse}
+              >
+                Drive to course & Start
+              </Button>
+            ) : null}
           </div>
         </>
       ) : null}

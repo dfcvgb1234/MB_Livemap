@@ -29,9 +29,9 @@ if (-not (Test-Path $node)) {
 $rule = netsh advfirewall firewall show rule name="MB Livemap" | Out-String
 if ($rule -notmatch "43127") {
   try {
-    Start-Process -FilePath (Join-Path $Root "Allow iPad.bat") -Verb RunAs -Wait | Out-Null
+    Start-Process -FilePath (Join-Path $Root "Allow tablet.bat") -Verb RunAs -Wait | Out-Null
   } catch {
-    # Allow iPad.bat can be run again if this prompt was dismissed.
+    # Allow tablet.bat can be run again if this prompt was dismissed.
   }
 }
 

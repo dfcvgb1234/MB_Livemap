@@ -2,14 +2,14 @@ MB Livemap
 ==========
 
 1. Double-click "MB Livemap".
-2. If Windows asks for permission, allow the iPad to connect.
+2. If Windows asks for permission, allow the tablet to connect.
 3. In Farming Simulator, enable the mod "MB Livemap Bridge" and load your save.
 4. On this PC the page opens by itself.
-   On an iPad, use the same Wi-Fi, tap the tablet icon, and scan the code.
+   On a tablet, use the same Wi-Fi, tap the tablet icon, and scan the code.
 
 A window stays open while MB Livemap is running. You can minimize it.
 To quit, close that window or click Stop.
 
-The iPad only shows the page. The game and MB Livemap stay on this PC.
-If the iPad cannot open the page, set this PC's Wi-Fi to Private
+The tablet only shows the page. The game and MB Livemap stay on this PC.
+If the tablet cannot open the page, set this PC's Wi-Fi to Private
 (Windows Settings, Network and internet, Wi-Fi, your network, Private).

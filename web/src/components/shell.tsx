@@ -9,12 +9,8 @@ import { NotificationHistorySheet } from "@/components/notification-history-shee
 import { SettingsProvider, useSettings } from "@/components/settings-provider";
 import { SettingsSheet } from "@/components/settings-sheet";
 import { NotificationProvider, ToastStack, useNotificationCenter } from "@/components/toast-stack";
+import { driverPageLabel } from "@/lib/driver-page";
 import { cn } from "@/lib/utils";
-
-const NAV = [
-  { href: "/", label: "Livemap" },
-  { href: "/autodrive", label: "AutoDrive" },
-] as const;
 
 function formatUpdated(ts: number | null | undefined) {
   if (!ts) return "No update yet";
@@ -22,7 +18,12 @@ function formatUpdated(ts: number | null | undefined) {
 }
 
 function ShellInner({ children }: { children: React.ReactNode }) {
-  const { state, bridgeStatus } = useLivemapContext();
+  const { state, bridgeStatus, autoDrive, courseplay } = useLivemapContext();
+  const driverLabel = driverPageLabel(autoDrive?.available === true, courseplay?.available === true);
+  const nav = [
+    { href: "/", label: "Livemap" },
+    ...(driverLabel ? [{ href: "/autodrive", label: driverLabel }] : []),
+  ];
   const { setOpen } = useSettings();
   const { history, setHistoryOpen } = useNotificationCenter();
   const pathname = usePathname();
@@ -45,7 +46,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="flex items-center gap-1 rounded-xl bg-black/25 p-1">
-          {NAV.map(({ href, label }) => {
+          {nav.map(({ href, label }) => {
             const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
             return (
               <Link
