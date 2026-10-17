@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createTcpServer, type Socket } from "node:net";
 import { homedir } from "node:os";
@@ -51,6 +51,7 @@ const SETTINGS_DIR =
   );
 const COMMAND_FILE = path.join(SETTINGS_DIR, "commands.xml");
 const SESSION_FILE = path.join(SETTINGS_DIR, "session.xml");
+const COURSE_WATCH_FILE = path.join(SETTINGS_DIR, "coursewatch.txt");
 const TOKEN = process.env.MB_LIVEMAP_TOKEN ?? "";
 const STATIC_ROOT = staticRootFromEnv();
 const DESKTOP = STATIC_ROOT !== "";
@@ -145,6 +146,90 @@ function setCourseplay(courses: CourseplayCourses, fromMock = false) {
   latestCourseplay = courses;
   courseplayFromMock = fromMock;
   broadcast(courses);
+  rememberCourseMtimes(courses, fromMock);
+  courseRefreshPending = false;
+}
+
+const registeredCourseMtime = new Map<string, number>();
+let courseRefreshPending = false;
+let courseRefreshPendingAt = 0;
+
+function readCourseWatchGeneration(): number {
+  try {
+    const value = Number(readFileSync(COURSE_WATCH_FILE, "utf8").trim());
+    if (Number.isFinite(value) && value >= 0) return Math.floor(value);
+  } catch {
+    // No watch file yet.
+  }
+  return 0;
+}
+
+let courseWatchGeneration = readCourseWatchGeneration();
+
+function courseplayCoursePath(filePath: string): string | null {
+  if (typeof filePath !== "string" || filePath === "" || filePath.includes("\0")) return null;
+  const resolved = path.resolve(filePath);
+  const parts = resolved.split(path.sep).map((part) => part.toLowerCase());
+  if (!parts.includes("fs25_courseplay")) return null;
+  return resolved;
+}
+
+function courseMtimeMs(filePath: string): number | null {
+  const resolved = courseplayCoursePath(filePath);
+  if (resolved == null) return null;
+  try {
+    const stat = statSync(resolved);
+    return stat.isFile() ? stat.mtimeMs : null;
+  } catch {
+    return null;
+  }
+}
+
+function rememberCourseMtimes(courses: CourseplayCourses, fromMock: boolean) {
+  registeredCourseMtime.clear();
+  if (fromMock || mockActive) return;
+  for (const course of courses.courses ?? []) {
+    const resolved = courseplayCoursePath(course.id);
+    const mtime = resolved == null ? null : courseMtimeMs(resolved);
+    if (resolved != null && mtime != null) registeredCourseMtime.set(resolved, mtime);
+  }
+}
+
+function publishCourseWatch(generation: number) {
+  mkdirSync(SETTINGS_DIR, { recursive: true });
+  const tmp = `${COURSE_WATCH_FILE}.tmp`;
+  writeFileSync(tmp, `${generation}\n`, "utf8");
+  try {
+    unlinkSync(COURSE_WATCH_FILE);
+  } catch {
+    // The first publish has nothing to replace.
+  }
+  renameSync(tmp, COURSE_WATCH_FILE);
+}
+
+function coursesAreNewer(): boolean {
+  for (const [filePath, registered] of registeredCourseMtime) {
+    const mtime = courseMtimeMs(filePath);
+    if (mtime != null && mtime > registered) return true;
+  }
+  return false;
+}
+
+function pollCourseMtimes() {
+  if (mockActive || courseplayFromMock || registeredCourseMtime.size === 0) return;
+  if (!coursesAreNewer()) return;
+  if (courseRefreshPending && Date.now() - courseRefreshPendingAt < 5000) return;
+  courseWatchGeneration += 1;
+  courseRefreshPending = true;
+  courseRefreshPendingAt = Date.now();
+  try {
+    publishCourseWatch(courseWatchGeneration);
+  } catch (err) {
+    console.warn("[courseplay] could not mark courses for reload:", err instanceof Error ? err.message : err);
+    return;
+  }
+  console.log("[courseplay] saved course is newer than the registered one — reloading");
+  sendToMod(JSON.stringify({ type: "refreshCourses" }));
 }
 
 function xmlAttr(value: string) {
@@ -660,6 +745,8 @@ if (process.platform === "win32") {
   });
   setInterval(flushPipeCommands, 200);
 }
+
+setInterval(pollCourseMtimes, 1000);
 
 function attachWebClients(wss: WebSocketServer) {
 wss.on("connection", (ws, req) => {

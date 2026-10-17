@@ -14,8 +14,7 @@ local loggedResolve = false
 local finishHooked = false
 local courseSchema = nil
 local handoffs = {}
--- path -> { stamp = string, count = number }. The stamp is the file size plus the
--- end of the file, so saving a new course over the same name invalidates the count.
+-- path -> vehicle count. Cleared when a saved course file is newer than the one last sent.
 local vehicleCounts = {}
 local tempSerial = 0
 -- Vehicles currently driving to a temporary destination, keyed by AutoDrive waypoint id.
@@ -330,70 +329,11 @@ local function childFolder(folder, directory)
     return name
 end
 
--- Giants keeps a loaded XML document for the lifetime of its handle, and a fixed
--- document name can hand back the previous course after the file is overwritten.
+-- Giants keeps a loaded XML document under the name it was opened with.
+-- A new name each read picks up a course that was saved over the same file.
 local function xmlDocumentName(prefix)
     tempSerial = tempSerial + 1
     return prefix .. tostring(nowMs()) .. "_" .. tostring(tempSerial)
-end
-
-local function removeTempCourse(path, isTemp)
-    if not isTemp or type(path) ~= "string" or deleteFile == nil then
-        return
-    end
-    pcall(function()
-        deleteFile(path)
-    end)
-end
-
--- Copy aside so a read cannot receive an XML document cached for the original path.
-local function copyCourseFile(path)
-    if type(path) ~= "string" or copyFile == nil then
-        return path, false
-    end
-    local tempPath = path .. ".mblivemap" .. tostring(xmlDocumentName(""))
-    pcall(copyFile, path, tempPath, true)
-    if fileExists ~= nil and fileExists(tempPath) == true then
-        return tempPath, true
-    end
-    removeTempCourse(tempPath, true)
-    return path, false
-end
-
--- Size plus the end of the file. An overwritten course changes at least one of these.
-local function fileStamp(path)
-    if type(path) ~= "string" then
-        return nil
-    end
-    if type(io) == "table" and type(io.open) == "function" then
-        local ok, stamp = pcall(function()
-            local handle = io.open(path, "rb")
-            if handle == nil then
-                return nil
-            end
-            local size = handle:seek("end")
-            local tail = ""
-            if type(size) == "number" and size > 0 then
-                handle:seek("set", math.max(0, size - 80))
-                tail = handle:read(80) or ""
-            end
-            handle:close()
-            if type(size) ~= "number" then
-                return nil
-            end
-            return tostring(size) .. ":" .. tail
-        end)
-        if ok and type(stamp) == "string" then
-            return stamp
-        end
-    end
-    if type(getFileSize) == "function" then
-        local ok, size = pcall(getFileSize, path)
-        if ok and type(size) == "number" then
-            return "size:" .. tostring(size)
-        end
-    end
-    return nil
 end
 
 local function clampVehicleCount(count)
@@ -411,29 +351,22 @@ local function readVehicleCount(path)
     if loadXMLFile == nil or getXMLInt == nil or delete == nil then
         return clampVehicleCount(count)
     end
-    local readPath, isTemp = copyCourseFile(path)
-    local handle = loadXMLFile(xmlDocumentName("mbLivemapCpVehicles"), readPath)
+    local handle = loadXMLFile(xmlDocumentName("mbLivemapCpVehicles"), path)
     if handle ~= nil and handle ~= 0 then
         count = getXMLInt(handle, "Courses.Course(0)#nVehicles")
         delete(handle)
     end
-    removeTempCourse(readPath, isTemp)
     return clampVehicleCount(count)
 end
 
 -- Courseplay stores the convoy size on the course. Missing or unreadable files count as one vehicle.
 local function courseVehicleCount(path)
-    local stamp = fileStamp(path)
     local cached = vehicleCounts[path]
-    if cached ~= nil and stamp ~= nil and cached.stamp == stamp then
-        return cached.count
+    if cached ~= nil then
+        return cached
     end
     local count = readVehicleCount(path)
-    if stamp ~= nil then
-        vehicleCounts[path] = { stamp = stamp, count = count }
-    else
-        vehicleCounts[path] = nil
-    end
+    vehicleCounts[path] = count
     return count
 end
 
@@ -518,8 +451,6 @@ function CourseplaySync:fingerprintOf()
             .. course.id
             .. "#"
             .. tostring(course.vehicles or 1)
-            .. "@"
-            .. (fileStamp(course.id) or "")
     end
     return table.concat(ids, "|")
 end
@@ -540,6 +471,9 @@ function CourseplaySync:buildMessage()
 end
 
 function CourseplaySync:collectIfChanged(force)
+    if force then
+        vehicleCounts = {}
+    end
     local ok, message = pcall(function()
         local fingerprint = self:fingerprintOf()
         if not force and fingerprint == self.fingerprint then
@@ -680,10 +614,8 @@ function CourseplaySync.coursePoints(courseId)
     if schema == nil or XMLFile == nil or XMLFile.load == nil then
         return nil, "Course XML is not available"
     end
-    local readPath, isTemp = copyCourseFile(file:getFullPath())
-    local xmlFile = XMLFile.load(xmlDocumentName("mbLivemapCpCourse"), readPath, schema)
+    local xmlFile = XMLFile.load(xmlDocumentName("mbLivemapCpCourse"), file:getFullPath(), schema)
     if xmlFile == nil then
-        removeTempCourse(readPath, isTemp)
         return nil, "Could not read course"
     end
     local points = {}
@@ -730,7 +662,6 @@ function CourseplaySync.coursePoints(courseId)
         end)
     end
     xmlFile:delete()
-    removeTempCourse(readPath, isTemp)
     if state.last ~= nil and (points[#points] == nil or points[#points].x ~= state.last.x or points[#points].z ~= state.last.z) then
         points[#points + 1] = state.last
     end
@@ -1039,25 +970,7 @@ local function loadCourse(vehicle, courseId)
     if file == nil then
         error("Unknown course")
     end
-    -- Courseplay reads file.fullPath. Point that at a fresh copy so an overwritten
-    -- course is not served from the XML document cached for the original path.
-    local sourcePath = file.fullPath
-    if type(sourcePath) ~= "string" and file.getFullPath ~= nil then
-        sourcePath = file:getFullPath()
-    end
-    local readPath, isTemp = copyCourseFile(sourcePath)
-    local originalPath = file.fullPath
-    if isTemp then
-        file.fullPath = readPath
-    end
-    local ok, err = pcall(function()
-        vehicle:appendLoadedCpCourse(file)
-    end)
-    file.fullPath = originalPath
-    removeTempCourse(readPath, isTemp)
-    if not ok then
-        error(err)
-    end
+    vehicle:appendLoadedCpCourse(file)
     if vehicle.hasCpCourse == nil or vehicle:hasCpCourse() ~= true then
         error("Could not load course")
     end

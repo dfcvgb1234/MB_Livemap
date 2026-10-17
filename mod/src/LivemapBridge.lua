@@ -17,6 +17,8 @@ function LivemapBridge.new()
     self.vehicleAccum = 0
     self.slowAccum = SLOW_INTERVAL_MS -- force immediate slow refresh
     self.adAccum = 0
+    self.courseWatchAccum = 0
+    self.courseWatchSeen = nil
     self.wasConnected = false
     self.running = false
     self.updateFn = nil
@@ -58,9 +60,33 @@ function LivemapBridge:stop()
     self.tcp:disconnect()
 end
 
+function LivemapBridge:courseWatchGeneration()
+    local path = self.tcp ~= nil and self.tcp.courseWatchPath or nil
+    if type(path) ~= "string" or type(io) ~= "table" or type(io.open) ~= "function" then
+        return nil
+    end
+    local ok, value = pcall(function()
+        local handle = io.open(path, "rb")
+        if handle == nil then
+            return nil
+        end
+        local text = handle:read("*l")
+        handle:close()
+        return tonumber(text)
+    end)
+    if not ok or type(value) ~= "number" then
+        return nil
+    end
+    return value
+end
+
 function LivemapBridge:sendCourseplay(force)
     if not self.tcp:isConnected() or self.courseplay == nil then
         return
+    end
+    local generation = self:courseWatchGeneration()
+    if not force and type(generation) == "number" and type(self.courseWatchSeen) == "number" and generation > self.courseWatchSeen then
+        force = true
     end
     local message = self.courseplay:collectIfChanged(force)
     if message == nil then
@@ -68,6 +94,12 @@ function LivemapBridge:sendCourseplay(force)
     end
     if not self.tcp:sendLine(Json.encode(message)) then
         self.courseplay:invalidate()
+        return
+    end
+    if type(generation) == "number" then
+        self.courseWatchSeen = generation
+    elseif self.courseWatchSeen == nil then
+        self.courseWatchSeen = 0
     end
 end
 
@@ -129,6 +161,15 @@ function LivemapBridge:update(dt)
     end
     self.wasConnected = connected
 
+    self.courseWatchAccum = self.courseWatchAccum + dt
+    if connected and self.courseWatchAccum >= 1000 then
+        self.courseWatchAccum = 0
+        local generation = self:courseWatchGeneration()
+        if type(generation) == "number" and type(self.courseWatchSeen) == "number" and generation > self.courseWatchSeen then
+            self:sendCourseplay(true)
+        end
+    end
+
     if connected and self.adAccum >= AD_INTERVAL_MS then
         self.adAccum = 0
         self:sendAutoDrive(false)
@@ -156,6 +197,8 @@ function LivemapBridge:onLine(line)
     if msg.type == "command" then
         local result = self.commands:handle(msg)
         self.tcp:sendLine(Json.encode(result))
+    elseif msg.type == "refreshCourses" then
+        self:sendCourseplay(true)
     elseif msg.type == "hello" then
         Logging.info("[MB Livemap] bridge hello received")
     end
