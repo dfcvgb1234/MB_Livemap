@@ -41,6 +41,10 @@ function TcpClient.new(host, port)
     self.sessionId = nil
     self.commandPath = nil
     self.sessionPath = nil
+    self.farmFilterPath = nil
+    self.enabledFarmIds = nil
+    self.lastFarmPoll = 0
+    self.farmFilterSignature = nil
     self:initCommandFiles()
     return self
 end
@@ -63,6 +67,7 @@ function TcpClient:initCommandFiles()
     pcall(createFolder, dir)
     self.commandPath = dir .. "commands.xml"
     self.sessionPath = dir .. "session.xml"
+    self.farmFilterPath = dir .. "farms.xml"
     self.courseWatchPath = dir .. "coursewatch.txt"
     if deleteFile ~= nil and fileExists ~= nil and fileExists(self.commandPath) then
         pcall(deleteFile, self.commandPath)
@@ -204,6 +209,49 @@ function TcpClient:checkSession()
     end
 end
 
+function TcpClient:pollFarmFilter()
+    if self.farmFilterPath == nil or XMLFile == nil then
+        return
+    end
+    local now = g_time or 0
+    if now - self.lastFarmPoll < COMMAND_POLL_MS then
+        return
+    end
+    self.lastFarmPoll = now
+
+    local xmlFile = nil
+    local ok = pcall(function()
+        xmlFile = XMLFile.loadIfExists("mbLivemapFarms", self.farmFilterPath)
+    end)
+    if not ok or xmlFile == nil then
+        self.enabledFarmIds = nil
+        self.farmFilterSignature = nil
+        return
+    end
+
+    local raw = nil
+    pcall(function()
+        raw = xmlFile:getString("farms#ids")
+    end)
+    pcall(function()
+        xmlFile:delete()
+    end)
+
+    local signature = raw or ""
+    if signature == self.farmFilterSignature and self.enabledFarmIds ~= nil then
+        return
+    end
+    self.farmFilterSignature = signature
+    local enabled = {}
+    for token in string.gmatch(signature, "[^,%s]+") do
+        local id = tonumber(token)
+        if id ~= nil and id > 0 then
+            enabled[id] = true
+        end
+    end
+    self.enabledFarmIds = enabled
+end
+
 function TcpClient:pollCommand()
     if self.commandPath == nil or self.onLine == nil or XMLFile == nil then
         return
@@ -274,6 +322,7 @@ end
 
 function TcpClient:updatePipe()
     self:checkSession()
+    self:pollFarmFilter()
     if self.pipe == nil then
         self:connect()
         return
@@ -286,6 +335,8 @@ function TcpClient:update()
         self:updatePipe()
         return
     end
+
+    self:pollFarmFilter()
 
     if not self:isConnected() then
         self:connect()

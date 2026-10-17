@@ -557,6 +557,8 @@ function StateCollector.new()
     self.customEnvironment = nil
     self.mapDirectory = nil
     self.missionDirectory = nil
+    -- Farm ids the dashboard asked to include. Nil means the host farm only.
+    self.enabledFarmIds = nil
     return self
 end
 
@@ -697,6 +699,699 @@ local function autoDriveFillTypes(vehicle)
     return nil
 end
 
+local function trimText(value)
+    if type(value) ~= "string" then
+        return ""
+    end
+    return (value:gsub("^%s+", ""):gsub("%s+$", ""))
+end
+
+local function isDedicatedServer()
+    return g_dedicatedServer ~= nil or g_dedicatedServerInfo ~= nil
+end
+
+-- A listen server the host is playing on. Dedicated servers and joining clients stay out.
+local function isHostedMultiplayer()
+    if isDedicatedServer() then
+        return false
+    end
+    local mission = g_currentMission
+    if mission == nil then
+        return false
+    end
+    local info = mission.missionDynamicInfo
+    if type(info) ~= "table" or info.isMultiplayer ~= true then
+        return false
+    end
+    if mission.getIsServer ~= nil then
+        local ok, isServer = pcall(function()
+            return mission:getIsServer()
+        end)
+        if not ok or isServer ~= true then
+            return false
+        end
+    end
+    return true
+end
+
+local function multiplayerPlayer()
+    if g_localPlayer ~= nil then
+        return g_localPlayer
+    end
+    local mission = g_currentMission
+    if mission == nil then
+        return nil
+    end
+    if mission.playerSystem ~= nil and mission.playerSystem.getLocalPlayer ~= nil then
+        local ok, player = pcall(function()
+            return mission.playerSystem:getLocalPlayer()
+        end)
+        if ok and player ~= nil then
+            return player
+        end
+    end
+    return mission.player
+end
+
+local function positiveFarmId(value)
+    if type(value) == "table" then
+        value = value.farmId or value.id
+    end
+    local id = tonumber(value)
+    if id == nil or id <= 0 then
+        return nil
+    end
+    if FarmManager ~= nil and id == FarmManager.SPECTATOR_FARM_ID then
+        return nil
+    end
+    return id
+end
+
+local function localFarmId()
+    local player = multiplayerPlayer()
+    if player ~= nil and player.getFarmId ~= nil then
+        local ok, id = pcall(function()
+            return player:getFarmId()
+        end)
+        if ok then
+            local farmId = positiveFarmId(id)
+            if farmId ~= nil then
+                return farmId
+            end
+        end
+    end
+    local mission = g_currentMission
+    if mission ~= nil and mission.getFarmId ~= nil then
+        local ok, id = pcall(function()
+            return mission:getFarmId()
+        end)
+        if ok then
+            return positiveFarmId(id)
+        end
+    end
+    return nil
+end
+
+local function colorChannel(value)
+    local number = tonumber(value)
+    if number == nil then
+        return nil
+    end
+    if number >= 0 and number <= 1 then
+        return math.floor(number * 255 + 0.5)
+    end
+    if number >= 0 and number <= 255 then
+        return math.floor(number + 0.5)
+    end
+    return nil
+end
+
+local function rgbHex(r, g, b)
+    local red = colorChannel(r)
+    local green = colorChannel(g)
+    local blue = colorChannel(b)
+    if red == nil or green == nil or blue == nil then
+        return nil
+    end
+    return string.format("#%02x%02x%02x", red, green, blue)
+end
+
+local function tableColor(color)
+    if type(color) ~= "table" then
+        return nil
+    end
+    if color[1] ~= nil then
+        return rgbHex(color[1], color[2], color[3])
+    end
+    return rgbHex(color.r or color.x, color.g or color.y, color.b or color.z)
+end
+
+local function farmColorHex(farm, farmId)
+    if type(farm) == "table" then
+        local hex = tableColor(farm.color) or tableColor(farm.uiColor) or tableColor(farm.farmColor)
+        if hex ~= nil then
+            return hex
+        end
+        if farm.getColor ~= nil then
+            local ok, r, g, b = pcall(function()
+                return farm:getColor()
+            end)
+            if ok then
+                hex = type(r) == "table" and tableColor(r) or rgbHex(r, g, b)
+                if hex ~= nil then
+                    return hex
+                end
+            end
+        end
+    end
+    if g_farmManager ~= nil and type(farmId) == "number" then
+        local palettes = { g_farmManager.farmColors, g_farmManager.colors }
+        for index = 1, 2 do
+            local colors = palettes[index]
+            if type(colors) == "table" then
+                local hex = tableColor(colors[farmId])
+                if hex ~= nil then
+                    return hex
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function callNumber(object, methodName)
+    if type(object) ~= "table" or object[methodName] == nil then
+        return nil
+    end
+    local ok, value = pcall(object[methodName], object)
+    if ok and type(value) == "number" then
+        return value
+    end
+    return nil
+end
+
+-- "Farm 1" is the empty-slot label. A name the player typed is anything else.
+local function genericFarmLabel(name, farmId)
+    return name ~= "" and name:lower() == ("farm " .. tostring(farmId))
+end
+
+local function rawFarmName(farm)
+    if type(farm) ~= "table" then
+        return ""
+    end
+    local fields = { farm.name, farm.farmName, farm.title, farm.customName }
+    for index = 1, #fields do
+        local name = trimText(fields[index])
+        if name ~= "" then
+            return name
+        end
+    end
+    if farm.getName ~= nil then
+        local ok, value = pcall(function()
+            return farm:getName()
+        end)
+        if ok then
+            return trimText(value)
+        end
+    end
+    return ""
+end
+
+local function farmPlayerCount(farm)
+    local count = callNumber(farm, "getNumPlayers")
+    if count ~= nil then
+        return count
+    end
+    if type(farm) == "table" and type(farm.players) == "table" then
+        local total = 0
+        for _ in pairs(farm.players) do
+            total = total + 1
+        end
+        return total
+    end
+    return 0
+end
+
+-- Array indexes are not farm ids. Resolve the farm object, then read its id.
+local function resolveFarm(candidate, key)
+    if type(candidate) == "table" then
+        local id = positiveFarmId(candidate.farmId or candidate.id)
+        if id == nil and candidate.getId ~= nil then
+            local ok, value = pcall(function()
+                return candidate:getId()
+            end)
+            if ok then
+                id = positiveFarmId(value)
+            end
+        end
+        if id ~= nil then
+            return candidate, id
+        end
+        if candidate.farmId ~= nil or candidate.isSpectator == true then
+            return nil, nil
+        end
+    end
+    local id = positiveFarmId(key)
+    if id == nil then
+        id = positiveFarmId(candidate)
+    end
+    if id == nil or g_farmManager == nil or g_farmManager.getFarmById == nil then
+        return nil, nil
+    end
+    local ok, farm = pcall(function()
+        return g_farmManager:getFarmById(id)
+    end)
+    if ok and type(farm) == "table" then
+        return farm, positiveFarmId(farm.farmId or farm.id) or id
+    end
+    return nil, nil
+end
+
+local function readOwnerFarmId(vehicle)
+    if vehicle == nil then
+        return nil
+    end
+    local id = safeCall(function()
+        if vehicle.getOwnerFarmId ~= nil then
+            return vehicle:getOwnerFarmId()
+        end
+        return vehicle.ownerFarmId
+    end, nil)
+    if type(id) == "number" then
+        return id
+    end
+    return tonumber(id)
+end
+
+-- Unowned equipment stays. A real farm is included when it is the host farm or the dashboard enabled it.
+local function farmIsVisible(farmId, ownFarm, enabled)
+    if type(farmId) ~= "number" or farmId <= 0 then
+        return true
+    end
+    if FarmManager ~= nil and farmId == FarmManager.SPECTATOR_FARM_ID then
+        return false
+    end
+    if ownFarm ~= nil and farmId == ownFarm then
+        return true
+    end
+    if type(enabled) == "table" and enabled[farmId] == true then
+        return true
+    end
+    return false
+end
+
+local function appendFarm(farms, seen, candidate, key)
+    local farm, id = resolveFarm(candidate, key)
+    if farm == nil or id == nil or seen[id] == true then
+        return
+    end
+    local name = rawFarmName(farm)
+    local players = farmPlayerCount(farm)
+    -- Hosted games pre-create empty slots. They have no name and no players.
+    if (name == "" or genericFarmLabel(name, id)) and players <= 0 then
+        return
+    end
+    seen[id] = true
+    if name == "" or genericFarmLabel(name, id) then
+        name = "Farm " .. tostring(id)
+    end
+    local entry = {
+        id = id,
+        name = name,
+    }
+    local color = farmColorHex(farm, id)
+    if color ~= nil then
+        entry.color = color
+    end
+    local balance = callNumber(farm, "getBalance")
+    if balance == nil and type(farm.money) == "number" then
+        balance = farm.money
+    end
+    local loan = callNumber(farm, "getLoan")
+    if loan == nil and type(farm.loan) == "number" then
+        loan = farm.loan
+    end
+    local equity = callNumber(farm, "getEquity")
+    if balance ~= nil then
+        entry.balance = balance
+    end
+    if loan ~= nil then
+        entry.loan = loan
+    end
+    if equity ~= nil then
+        entry.equity = equity
+    end
+    farms[#farms + 1] = entry
+end
+
+local function collectFarms()
+    local farms = {}
+    local seen = {}
+    if g_farmManager == nil then
+        return farms
+    end
+    local listed = false
+    if g_farmManager.getFarms ~= nil then
+        local ok, list = pcall(function()
+            return g_farmManager:getFarms()
+        end)
+        if ok and type(list) == "table" then
+            listed = true
+            for key, farm in pairs(list) do
+                appendFarm(farms, seen, farm, key)
+            end
+        end
+    end
+    if not listed and type(g_farmManager.farms) == "table" then
+        for key, farm in pairs(g_farmManager.farms) do
+            appendFarm(farms, seen, farm, key)
+        end
+    end
+    table.sort(farms, function(a, b)
+        return a.id < b.id
+    end)
+    return farms
+end
+
+local function worldPose(node)
+    if node == nil or node == 0 then
+        return nil, nil, nil
+    end
+    local ok, x, _, z = pcall(function()
+        return getWorldTranslation(node)
+    end)
+    if not ok or x == nil or z == nil then
+        return nil, nil, nil
+    end
+    local heading = nil
+    local okDir, dx, _, dz = pcall(function()
+        return localDirectionToWorld(node, 0, 0, 1)
+    end)
+    if okDir and dx ~= nil and dz ~= nil and MathUtil ~= nil and MathUtil.getYRotationFromDirection ~= nil then
+        heading = MathUtil.getYRotationFromDirection(dx, dz)
+    end
+    return x, z, heading
+end
+
+local function playerPose(player)
+    if player == nil then
+        return nil, nil, nil
+    end
+    local interpolator = player.positionalInterpolator
+    if interpolator ~= nil and interpolator.positionInterpolator ~= nil and interpolator.yawInterpolator ~= nil then
+        local x = interpolator.positionInterpolator.positionX
+        local z = interpolator.positionInterpolator.positionZ
+        local heading = interpolator.yawInterpolator.value
+        if x ~= nil and z ~= nil then
+            return x, z, heading
+        end
+    end
+    if player.rootNode ~= nil and player.rootNode ~= 0 and player.getMapPositionAndLookYaw ~= nil then
+        local ok, x, z, heading = pcall(function()
+            return player:getMapPositionAndLookYaw()
+        end)
+        if ok and x ~= nil and z ~= nil then
+            return x, z, heading
+        end
+    end
+    if player.getPosition ~= nil then
+        local ok, x, _, z = pcall(function()
+            return player:getPosition()
+        end)
+        if ok and x ~= nil and z ~= nil then
+            return x, z, player.rotY
+        end
+    end
+    return worldPose(player.rootNode)
+end
+
+local function isLocalPlayerInstance(player)
+    if player == nil then
+        return false
+    end
+    local host = multiplayerPlayer()
+    if host ~= nil and player == host then
+        return true
+    end
+    return player.isOwner == true or player.isLocallyControlled == true
+end
+
+local function playerNickname(player, fallback)
+    if player ~= nil and player.getNickname ~= nil then
+        local ok, name = pcall(function()
+            return player:getNickname()
+        end)
+        name = ok and trimText(name) or ""
+        if name ~= "" then
+            return name
+        end
+    end
+    return fallback or ""
+end
+
+local function numericId(value)
+    if type(value) == "number" then
+        return value
+    end
+    return tonumber(value)
+end
+
+-- Players, users, and vehicles do not all store the farm on the same field.
+local function objectFarmId(object)
+    if type(object) ~= "table" then
+        return nil
+    end
+    local getters = { "getFarmId", "getFarm", "getCurrentFarmId", "getActiveFarmId", "getOwnerFarmId" }
+    for index = 1, #getters do
+        local getter = object[getters[index]]
+        if getter ~= nil then
+            local ok, value = pcall(getter, object)
+            if ok then
+                local farmId = positiveFarmId(value)
+                if farmId ~= nil then
+                    return farmId
+                end
+            end
+        end
+    end
+    local fields = { object.farmId, object.currentFarmId, object.activeFarmId, object.ownerFarmId }
+    for index = 1, #fields do
+        local farmId = positiveFarmId(fields[index])
+        if farmId ~= nil then
+            return farmId
+        end
+    end
+    if type(object.farm) == "table" then
+        return positiveFarmId(object.farm.farmId or object.farm.id)
+    end
+    return nil
+end
+
+local function userIdOf(object)
+    if type(object) ~= "table" then
+        return nil
+    end
+    if object.getUserId ~= nil then
+        local ok, value = pcall(function()
+            return object:getUserId()
+        end)
+        if ok then
+            local id = numericId(value)
+            if id ~= nil and id > 0 then
+                return id
+            end
+        end
+    end
+    local id = numericId(object.userId)
+    if id ~= nil and id > 0 then
+        return id
+    end
+    return nil
+end
+
+local function farmIdForUser(userId)
+    userId = numericId(userId)
+    if userId == nil or userId <= 0 or g_farmManager == nil or g_farmManager.getFarmByUserId == nil then
+        return nil
+    end
+    local ok, farm = pcall(function()
+        return g_farmManager:getFarmByUserId(userId)
+    end)
+    if ok then
+        return positiveFarmId(farm)
+    end
+    return nil
+end
+
+local function farmIdForUniqueUser(uniqueUserId)
+    if uniqueUserId == nil or uniqueUserId == "" or g_farmManager == nil or g_farmManager.getFarmForUniqueUserId == nil then
+        return nil
+    end
+    local ok, farm = pcall(function()
+        return g_farmManager:getFarmForUniqueUserId(uniqueUserId)
+    end)
+    if ok then
+        return positiveFarmId(farm)
+    end
+    return nil
+end
+
+local function playerFarmId(player, userId, isLocal, farmId)
+    farmId = positiveFarmId(farmId) or objectFarmId(player)
+    if farmId == nil then
+        local uid = numericId(userId)
+        if uid == nil or uid <= 0 then
+            uid = userIdOf(player)
+        end
+        farmId = farmIdForUser(uid)
+    end
+    if farmId == nil and isLocal == true then
+        farmId = localFarmId()
+    end
+    return farmId
+end
+
+local function controlledVehicleOf(player, isLocal)
+    if isLocal and g_currentMission ~= nil and type(g_currentMission.controlledVehicle) == "table" then
+        return g_currentMission.controlledVehicle
+    end
+    if player == nil then
+        return nil
+    end
+    local function entered(candidate)
+        if type(candidate) == "table" and candidate.rootNode ~= nil then
+            return candidate
+        end
+        return nil
+    end
+    return entered(player.controlledVehicle)
+        or entered(player.currentVehicle)
+        or entered(player.enteredVehicle)
+        or entered(player.vehicle)
+end
+
+local function exportablePlayerName(name)
+    name = trimText(name)
+    if name == "" or name == "Server" or name == "Unknown" then
+        return nil
+    end
+    return name
+end
+
+local function collectPlayers()
+    local players = {}
+    local seen = {}
+    local hasLocal = false
+    local mission = g_currentMission
+    if mission == nil then
+        return players
+    end
+
+    local function addPlayer(player, id, name, farmId, isLocal)
+        name = exportablePlayerName(name)
+        if name == nil or player == nil then
+            return
+        end
+        local uid = isLocal and ("local|" .. name) or ("user|" .. tostring(id or 0) .. "|" .. name)
+        local x, z, heading = playerPose(player)
+        local vehicle = controlledVehicleOf(player, isLocal)
+        if vehicle ~= nil then
+            local vx, vz, vHeading = worldPose(vehicle.rootNode)
+            if vx ~= nil and vz ~= nil then
+                x, z = vx, vz
+                if vHeading ~= nil then
+                    heading = vHeading
+                end
+            end
+        end
+        farmId = playerFarmId(player, id, isLocal, farmId)
+        if farmId == nil and vehicle ~= nil then
+            farmId = positiveFarmId(readOwnerFarmId(vehicle))
+        end
+        if seen[uid] == true then
+            if isLocal then
+                hasLocal = true
+            end
+            if type(farmId) == "number" and farmId > 0 then
+                for index = 1, #players do
+                    if players[index].id == uid and players[index].farmId == nil then
+                        players[index].farmId = farmId
+                    end
+                end
+            end
+            return
+        end
+        if x == nil or z == nil then
+            return
+        end
+        if isLocal ~= true and vehicle == nil and math.abs(x) < 0.001 and math.abs(z) < 0.001 then
+            return
+        end
+        seen[uid] = true
+        local entry = {
+            id = uid,
+            name = name,
+            x = x,
+            z = z,
+            heading = heading or 0,
+        }
+        if type(farmId) == "number" and farmId > 0 then
+            entry.farmId = farmId
+        end
+        players[#players + 1] = entry
+        if isLocal then
+            hasLocal = true
+        end
+    end
+
+    local userManager = mission.userManager
+    if userManager ~= nil and userManager.getUsers ~= nil then
+        local ok, users = pcall(function()
+            return userManager:getUsers()
+        end)
+        if ok and type(users) == "table" then
+            for _, user in pairs(users) do
+                if type(user) == "table" then
+                    local name = ""
+                    if user.getNickname ~= nil then
+                        local okName, value = pcall(function()
+                            return user:getNickname()
+                        end)
+                        if okName then
+                            name = trimText(value)
+                        end
+                    end
+                    local userId = nil
+                    if user.getId ~= nil then
+                        local okId, value = pcall(function()
+                            return user:getId()
+                        end)
+                        if okId then
+                            userId = tonumber(value)
+                        end
+                    end
+                    if exportablePlayerName(name) ~= nil and user.getConnection ~= nil and mission.connectionsToPlayer ~= nil then
+                        local okConnection, connection = pcall(function()
+                            return user:getConnection()
+                        end)
+                        local player = okConnection and connection ~= nil and mission.connectionsToPlayer[connection] or nil
+                        if player ~= nil then
+                            local farmId = objectFarmId(user) or farmIdForUser(userId)
+                            if farmId == nil and user.getUniqueUserId ~= nil then
+                                local okUnique, uniqueUserId = pcall(function()
+                                    return user:getUniqueUserId()
+                                end)
+                                if okUnique then
+                                    farmId = farmIdForUniqueUser(uniqueUserId)
+                                end
+                            end
+                            addPlayer(player, userId or 0, name, farmId, isLocalPlayerInstance(player))
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    if mission.playerSystem ~= nil and type(mission.playerSystem.players) == "table" then
+        for _, player in pairs(mission.playerSystem.players) do
+            if type(player) == "table" then
+                local isLocal = isLocalPlayerInstance(player)
+                addPlayer(player, userIdOf(player) or 0, playerNickname(player, isLocal and "Player" or ""), objectFarmId(player), isLocal)
+            end
+        end
+    end
+
+    if not hasLocal then
+        local player = mission.player or g_localPlayer
+        if player ~= nil then
+            addPlayer(player, userIdOf(player) or 0, playerNickname(player, "Player"), objectFarmId(player), true)
+        end
+    end
+
+    return players
+end
+
 function StateCollector:collectVehicles()
     local vehicles = {}
     local list = safeCall(function()
@@ -713,8 +1408,25 @@ function StateCollector:collectVehicles()
         return vehicles
     end
 
+    local hosted = isHostedMultiplayer()
+    local ownFarm = hosted and localFarmId() or nil
+    local farmNames = nil
+    if hosted then
+        farmNames = {}
+        for _, farm in ipairs(collectFarms()) do
+            farmNames[farm.id] = farm.name
+        end
+    end
+
     for _, vehicle in pairs(list) do
-        local category = vehicle ~= nil and vehicle.isDeleted ~= true and equipmentCategory(vehicle) or nil
+        local ownerId = nil
+        if hosted and vehicle ~= nil and vehicle.isDeleted ~= true then
+            ownerId = readOwnerFarmId(vehicle)
+        end
+        local category = nil
+        if vehicle ~= nil and vehicle.isDeleted ~= true and (not hosted or farmIsVisible(ownerId, ownFarm, self.enabledFarmIds)) then
+            category = equipmentCategory(vehicle)
+        end
         if category ~= nil then
             local x, y, z = 0, 0, 0
             local heading = 0
@@ -884,8 +1596,14 @@ function StateCollector:collectVehicles()
                 if cpState ~= nil then
                     entry.cpCapable = true
                     entry.cpActive = cpState.active and true or false
-                    if type(cpState.course) == "string" and cpState.course ~= "" then
-                        entry.cpCourse = cpState.course
+                if type(cpState.course) == "string" and cpState.course ~= "" then
+                    entry.cpCourse = cpState.course
+                end
+                end
+                if hosted and type(ownerId) == "number" and ownerId > 0 then
+                    entry.farmId = ownerId
+                    if farmNames ~= nil and type(farmNames[ownerId]) == "string" then
+                        entry.farmName = farmNames[ownerId]
                     end
                 end
                 vehicles[#vehicles + 1] = entry
@@ -1842,7 +2560,7 @@ function StateCollector:collectCalendar()
 end
 
 function StateCollector:buildSnapshot()
-    return {
+    local snapshot = {
         type = "state",
         ts = math.floor((g_time or (os.clock() * 1000))),
         source = "mod",
@@ -1858,4 +2576,11 @@ function StateCollector:buildSnapshot()
         productions = self.cachedProductions,
         animals = self.cachedAnimals,
     }
+    if isHostedMultiplayer() then
+        snapshot.multiplayer = true
+        snapshot.localFarmId = localFarmId()
+        snapshot.farms = collectFarms()
+        snapshot.players = collectPlayers()
+    end
+    return snapshot
 end

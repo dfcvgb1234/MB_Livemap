@@ -25,6 +25,28 @@ export type Vehicle = {
   cpCapable?: boolean;
   cpActive?: boolean;
   cpCourse?: string | null;
+  /** Owner farm. Sent on a hosted multiplayer server. */
+  farmId?: number;
+  farmName?: string;
+};
+
+export type FarmInfo = {
+  id: number;
+  name: string;
+  color?: string | null;
+  /** Farm account. Money in FS is per farm, shared by its players. */
+  balance?: number | null;
+  loan?: number | null;
+  equity?: number | null;
+};
+
+export type MapPlayer = {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  heading: number;
+  farmId?: number;
 };
 
 export type WeatherPoint = {
@@ -120,6 +142,12 @@ export type GameState = {
   /** In-game date. Null until the mod sends one. */
   calendar: GameCalendar | null;
   vehicles: Vehicle[];
+  /** True on a hosted multiplayer server. Omitted in singleplayer. */
+  multiplayer?: boolean;
+  /** Farm the host is playing. */
+  localFarmId?: number | null;
+  farms?: FarmInfo[];
+  players?: MapPlayer[];
   weather: Weather;
   fields: Field[];
   productions: Production[];

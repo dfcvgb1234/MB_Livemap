@@ -1,17 +1,20 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import type { AutoDriveGraph, Field, GameState, Vehicle } from "@/lib/types";
+import type { AutoDriveGraph, FarmInfo, Field, GameState, MapPlayer, Vehicle } from "@/lib/types";
 import { fruitColor } from "@/lib/crop-calendar";
 import { machineColor } from "@/lib/machine-colors";
 import type { MapImageFit } from "@/lib/settings";
 import { cn } from "@/lib/utils";
+import { useLivemapContext } from "@/components/livemap-provider";
 import { useSettings } from "@/components/settings-provider";
 
 type Props = {
   state: GameState | null;
   onSelectVehicle: (vehicle: Vehicle) => void;
+  onSelectPlayer?: (player: MapPlayer) => void;
   selectedId?: string | null;
+  selectedPlayerId?: string | null;
   /** When set and available, routes stay drawn. The main livemap omits this. */
   autoDrive?: AutoDriveGraph | null;
 };
@@ -418,18 +421,36 @@ const CATEGORY_LABEL: Record<EquipmentCategory, string> = {
   trailer: "Trailers",
 };
 
+function playerColor(farms: FarmInfo[], player: MapPlayer) {
+  if (player.farmId == null) return "#7eb6ff";
+  return farms.find((farm) => farm.id === player.farmId)?.color || "#7eb6ff";
+}
+
+function PlayerGlyph({ rotation = 0 }: { rotation?: number }) {
+  return (
+    <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+      <g transform={`rotate(${rotation} 12 12)`}>
+        <circle cx="12" cy="8" r="3" fill="currentColor" />
+        <path fill="currentColor" d="M12 12 L17 21 L12 18 L7 21 Z" />
+      </g>
+    </svg>
+  );
+}
+
 function EquipmentList({
   vehicles,
   selectedId,
   onSelect,
   colorFor,
   layers,
+  showFarm,
 }: {
   vehicles: Vehicle[];
   selectedId?: string | null;
   onSelect: (vehicle: Vehicle) => void;
   colorFor: (vehicle: Vehicle) => string;
   layers?: Record<EquipmentCategory, boolean>;
+  showFarm?: boolean;
 }) {
   const visible = LIST_CATEGORIES.filter((category) => layers == null || layers[category]);
   if (visible.length === 0) {
@@ -464,7 +485,12 @@ function EquipmentList({
                         className="size-2 shrink-0 rounded-full"
                         style={{ background: colorFor(item) }}
                       />
-                      <span className="truncate">{item.name}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate">{item.name}</span>
+                        {showFarm && item.farmName ? (
+                          <span className="block truncate text-[12px] text-[#b7b1a4]">{item.farmName}</span>
+                        ) : null}
+                      </span>
                     </button>
                   </li>
                 ))}
@@ -477,23 +503,134 @@ function EquipmentList({
   );
 }
 
+function PlayerList({
+  players,
+  farms,
+  selectedId,
+  onSelect,
+}: {
+  players: MapPlayer[];
+  farms: FarmInfo[];
+  selectedId?: string | null;
+  onSelect: (player: MapPlayer) => void;
+}) {
+  const sorted = [...players].sort((a, b) => a.name.localeCompare(b.name));
+  return (
+    <section className="mb-2 last:mb-0">
+      <h3 className="px-2 py-1 text-[11px] font-semibold tracking-[0.04em] text-[#b7b1a4] uppercase">
+        Players · {sorted.length}
+      </h3>
+      {sorted.length === 0 ? (
+        <p className="px-2 pb-1 text-[13px] text-[#b7b1a4]">None</p>
+      ) : (
+        <ul>
+          {sorted.map((player) => {
+            const farm = player.farmId == null ? undefined : farms.find((item) => item.id === player.farmId);
+            return (
+              <li key={player.id}>
+                <button
+                  type="button"
+                  className={cn(
+                    "flex min-h-11 w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[15px] hover:bg-white/[0.06]",
+                    selectedId === player.id && "bg-white/[0.08]",
+                  )}
+                  onClick={() => onSelect(player)}
+                >
+                  <span
+                    className="size-2 shrink-0 rounded-full"
+                    style={{ background: farm?.color || "#7eb6ff" }}
+                  />
+                  <span className="min-w-0">
+                    <span className="block truncate">{player.name}</span>
+                    {farm ? (
+                      <span className="block truncate text-[12px] text-[#b7b1a4]">{farm.name}</span>
+                    ) : null}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+function FarmList({
+  farms,
+  localFarmId,
+  enabledFarmIds,
+  onToggle,
+}: {
+  farms: FarmInfo[];
+  localFarmId?: number | null;
+  enabledFarmIds: number[] | null;
+  onToggle: (farmId: number, enabled: boolean) => void;
+}) {
+  if (farms.length === 0) {
+    return <p className="px-2 py-1 text-[13px] text-[#b7b1a4]">No farms yet.</p>;
+  }
+  return (
+    <ul>
+      {farms.map((farm) => {
+        const own = farm.id === localFarmId;
+        const checked = own || enabledFarmIds?.includes(farm.id) === true;
+        return (
+          <li key={farm.id}>
+            <label className="flex min-h-11 items-center gap-2 rounded-lg px-2 py-2 text-[15px]">
+              <input
+                type="checkbox"
+                className="accent-[#e2b657]"
+                checked={checked}
+                disabled={own}
+                onChange={(event) => onToggle(farm.id, event.target.checked)}
+              />
+              <span
+                className="size-2 shrink-0 rounded-full"
+                style={{ background: farm.color || "#e2b657" }}
+              />
+              <span className="truncate">
+                {farm.name}
+                {own ? " · yours" : ""}
+              </span>
+            </label>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function MapChrome({
   showMap,
   showFields,
   showVehicles,
   showImplements,
   showTrailers,
+  showPlayers,
+  multiplayer,
   listOpen,
+  farmsOpen,
   vehicles,
+  players,
+  farms,
+  localFarmId,
+  enabledFarmIds,
   selectedId,
+  selectedPlayerId,
+  showFarmNames,
   onMap,
   onFields,
   onVehicles,
   onImplements,
   onTrailers,
+  onPlayers,
   onList,
+  onFarms,
+  onToggleFarm,
   onReset,
   onSelect,
+  onSelectPlayer,
   colorFor,
 }: {
   showMap: boolean;
@@ -501,17 +638,30 @@ function MapChrome({
   showVehicles: boolean;
   showImplements: boolean;
   showTrailers: boolean;
+  showPlayers: boolean;
+  multiplayer: boolean;
   listOpen: boolean;
+  farmsOpen: boolean;
   vehicles: Vehicle[];
+  players: MapPlayer[];
+  farms: FarmInfo[];
+  localFarmId?: number | null;
+  enabledFarmIds: number[] | null;
   selectedId?: string | null;
+  selectedPlayerId?: string | null;
+  showFarmNames: boolean;
   onMap: (next: boolean) => void;
   onFields: (next: boolean) => void;
   onVehicles: (next: boolean) => void;
   onImplements: (next: boolean) => void;
   onTrailers: (next: boolean) => void;
+  onPlayers: (next: boolean) => void;
   onList: () => void;
+  onFarms: () => void;
+  onToggleFarm: (farmId: number, enabled: boolean) => void;
   onReset: () => void;
   onSelect: (vehicle: Vehicle) => void;
+  onSelectPlayer: (player: MapPlayer) => void;
   colorFor: (vehicle: Vehicle) => string;
 }) {
   const layerOn: Record<EquipmentCategory, boolean> = {
@@ -531,6 +681,17 @@ function MapChrome({
           <LayerToggle label="Vehicles" checked={showVehicles} onChange={onVehicles} />
           <LayerToggle label="Implements" checked={showImplements} onChange={onImplements} />
           <LayerToggle label="Trailers" checked={showTrailers} onChange={onTrailers} />
+          {multiplayer ? <LayerToggle label="Players" checked={showPlayers} onChange={onPlayers} /> : null}
+          {multiplayer ? (
+            <button
+              type="button"
+              className={`${toolClass} cursor-pointer`}
+              aria-expanded={farmsOpen}
+              onClick={onFarms}
+            >
+              Farms
+            </button>
+          ) : null}
           <button
             type="button"
             className={`${toolClass} cursor-pointer max-[1535px]:landscape:hidden`}
@@ -551,6 +712,25 @@ function MapChrome({
               onSelect={onSelect}
               colorFor={colorFor}
               layers={layerOn}
+              showFarm={showFarmNames}
+            />
+            {multiplayer ? (
+              <PlayerList
+                players={players}
+                farms={farms}
+                selectedId={selectedPlayerId}
+                onSelect={onSelectPlayer}
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {farmsOpen ? (
+          <div className="max-h-[min(420px,58vh)] w-[min(280px,calc(100vw-2rem))] overflow-auto rounded-2xl border border-white/10 bg-[#221e18]/95 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+            <FarmList
+              farms={farms}
+              localFarmId={localFarmId}
+              enabledFarmIds={enabledFarmIds}
+              onToggle={onToggleFarm}
             />
           </div>
         ) : null}
@@ -566,13 +746,23 @@ function MapChrome({
 export function MapSlot({
   children,
   vehicles,
+  players = [],
+  farms = [],
   selectedId,
+  selectedPlayerId,
   onSelect,
+  onSelectPlayer,
+  showFarm = false,
 }: {
   children: React.ReactNode;
   vehicles: Vehicle[];
+  players?: MapPlayer[];
+  farms?: FarmInfo[];
   selectedId?: string | null;
+  selectedPlayerId?: string | null;
   onSelect: (vehicle: Vehicle) => void;
+  onSelectPlayer?: (player: MapPlayer) => void;
+  showFarm?: boolean;
 }) {
   const { settings } = useSettings();
   const colorFor = (vehicle: Vehicle) => machineColor(vehicle, settings.colors);
@@ -591,13 +781,22 @@ export function MapSlot({
           selectedId={selectedId}
           onSelect={onSelect}
           colorFor={colorFor}
+          showFarm={showFarm}
         />
+        {onSelectPlayer ? (
+          <PlayerList
+            players={players}
+            farms={farms}
+            selectedId={selectedPlayerId}
+            onSelect={onSelectPlayer}
+          />
+        ) : null}
       </div>
     </section>
   );
 }
 
-export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props) {
+export function Livemap({ state, onSelectVehicle, onSelectPlayer, selectedId, selectedPlayerId, autoDrive }: Props) {
   const { settings, mapImageUrl } = useSettings();
   const colorFor = (vehicle: Vehicle) => machineColor(vehicle, settings.colors);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -607,7 +806,10 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
   const [showVehicles, setShowVehicles] = useState(true);
   const [showImplements, setShowImplements] = useState(true);
   const [showTrailers, setShowTrailers] = useState(true);
+  const [showPlayers, setShowPlayers] = useState(true);
   const [listOpen, setListOpen] = useState(false);
+  const [farmsOpen, setFarmsOpen] = useState(false);
+  const { enabledFarmIds, setFarmEnabled } = useLivemapContext();
   const [bounds, setBounds] = useState({ w: 0, h: 0 });
   const viewportRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef(view);
@@ -630,6 +832,10 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
   const mapSize = state?.mapSize && state.mapSize > 0 ? state.mapSize : 2048;
   const vehicles = state?.vehicles ?? [];
   const fields = state?.fields ?? [];
+  const multiplayer = state?.multiplayer === true;
+  const farms = state?.farms ?? [];
+  const players = state?.players ?? [];
+  const showFarmNames = multiplayer && farms.length > 1;
   const showRoutes = autoDrive?.available === true;
 
   const frame = useMemo(() => {
@@ -718,10 +924,19 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
     };
   };
 
-  const selectPressedVehicle = (target: EventTarget | null) => {
+  const selectPressedTarget = (target: EventTarget | null) => {
     if (!(target instanceof Element)) return;
-    const button = target.closest("[data-vehicle-id]");
-    const id = button?.getAttribute("data-vehicle-id");
+    const vehicleButton = target.closest("[data-vehicle-id]");
+    const playerButton = target.closest("[data-player-id]");
+    const playerHit =
+      playerButton != null && (vehicleButton == null || !vehicleButton.contains(playerButton));
+    if (playerHit) {
+      const id = playerButton.getAttribute("data-player-id");
+      const player = id == null || id === "" ? undefined : players.find((item) => item.id === id);
+      if (player != null) onSelectPlayer?.(player);
+      return;
+    }
+    const id = vehicleButton?.getAttribute("data-vehicle-id");
     if (id == null || id === "") return;
     const vehicle = vehicles.find((item) => item.id === id);
     if (vehicle != null) onSelectVehicle(vehicle);
@@ -813,7 +1028,7 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
       }, 0);
     } else if (pointersRef.current.size === 0) {
       // Pointer capture sends the click to the map, so select from the original press.
-      selectPressedVehicle(pressed);
+      selectPressedTarget(pressed);
     }
     pressTargetRef.current = null;
     const viewport = viewportRef.current;
@@ -835,17 +1050,36 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
       showVehicles={showVehicles}
       showImplements={showImplements}
       showTrailers={showTrailers}
+      showPlayers={showPlayers}
+      multiplayer={multiplayer}
       listOpen={listOpen}
+      farmsOpen={farmsOpen}
       vehicles={vehicles}
+      players={players}
+      farms={farms}
+      localFarmId={state?.localFarmId}
+      enabledFarmIds={enabledFarmIds}
       selectedId={selectedId}
+      selectedPlayerId={selectedPlayerId}
+      showFarmNames={showFarmNames}
       onMap={setShowMap}
       onFields={setShowFields}
       onVehicles={setShowVehicles}
       onImplements={setShowImplements}
       onTrailers={setShowTrailers}
-      onList={() => setListOpen((open) => !open)}
+      onPlayers={setShowPlayers}
+      onList={() => {
+        setListOpen((open) => !open);
+        setFarmsOpen(false);
+      }}
+      onFarms={() => {
+        setFarmsOpen((open) => !open);
+        setListOpen(false);
+      }}
+      onToggleFarm={setFarmEnabled}
       onReset={resetView}
       onSelect={onSelectVehicle}
+      onSelectPlayer={onSelectPlayer ?? (() => {})}
       colorFor={colorFor}
     />
   );
@@ -975,6 +1209,44 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
             </button>
           );
         })}
+        {multiplayer && showPlayers
+          ? players.map((player) => {
+              const pos = worldToPct(player.x, player.z, frame);
+              const deg = 180 - (player.heading * 180) / Math.PI;
+              const active = selectedPlayerId === player.id;
+              return (
+                <button
+                  key={player.id}
+                  type="button"
+                  data-player-id={player.id}
+                  tabIndex={-1}
+                  className={cn(
+                    "absolute z-40 ml-[-1.75rem] mt-[-1.75rem] flex size-14 touch-manipulation items-center justify-center rounded-full focus:outline-none",
+                    "cursor-pointer select-none",
+                    active && "bg-white/10",
+                  )}
+                  style={{ left: `${pos.left}%`, top: `${pos.top}%`, color: playerColor(farms, player) }}
+                  aria-label={player.name}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (suppressClickRef.current) {
+                      suppressClickRef.current = false;
+                      return;
+                    }
+                    onSelectPlayer?.(player);
+                  }}
+                >
+                  <span className="pointer-events-none flex size-4 items-center justify-center">
+                    <PlayerGlyph rotation={Math.round(deg)} />
+                  </span>
+                  <span className="pointer-events-none absolute top-[calc(50%+12px)] left-1/2 max-w-[8rem] -translate-x-1/2 truncate text-[11px] font-semibold whitespace-nowrap text-[#f3efe4] [text-shadow:0_1px_2px_rgba(16,14,11,0.95),0_0_3px_rgba(16,14,11,0.9)] [@media(pointer:coarse)]:text-[13px]">
+                    {player.name}
+                  </span>
+                </button>
+              );
+            })
+          : null}
       </div>
 
       {bounds.w > 0 ? (
@@ -1029,6 +1301,7 @@ export function Livemap({ state, onSelectVehicle, selectedId, autoDrive }: Props
                 className="max-w-[8rem] truncate text-[10px] font-medium text-[#f3efe4] [text-shadow:0_1px_2px_rgba(16,14,11,0.95),0_0_3px_rgba(16,14,11,0.9)] [@media(pointer:coarse)]:text-[13px]"
               >
                 {vehicle.name}
+                {showFarmNames && vehicle.farmName ? ` · ${vehicle.farmName}` : ""}
               </AnchoredLabel>
             );
           })}

@@ -26,6 +26,8 @@ type Props = {
     extra?: { mode?: AutoDriveMode; cpStart?: CourseplayStart; cpLane?: number },
   ) => string;
   lastResult: CommandResult | null;
+  /** False for a vehicle that is not on the host's farm. */
+  allowCommands?: boolean;
 };
 
 export function CourseplayCard({
@@ -41,6 +43,7 @@ export function CourseplayCard({
   onStartAt,
   onCommand,
   lastResult,
+  allowCommands = true,
 }: Props) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -90,7 +93,7 @@ export function CourseplayCard({
       {vehicle?.cpActive ? (
         <p className="mt-2 text-[13px] text-[#f3efe4]">Running {vehicle.cpCourse ?? "a course"}</p>
       ) : null}
-      {available ? (
+      {available && allowCommands ? (
         <>
           <label className="mt-3 block text-[13px] text-[#b7b1a4]" htmlFor="cp-course">
             Course

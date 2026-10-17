@@ -3,16 +3,18 @@
 import { useEffect, useRef, useState } from "react";
 import { Livemap, MapSlot } from "@/components/livemap";
 import { VehicleSheet } from "@/components/vehicle-sheet";
+import { PlayerSheet } from "@/components/player-sheet";
 import { CourseplayCard } from "@/components/courseplay-card";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { useLivemapContext } from "@/components/livemap-provider";
 import { courseLanes, defaultCourseLane } from "@/lib/course-lanes";
-import type { CourseplayStart, Vehicle } from "@/lib/types";
+import { vehicleAllowsCommands, type CourseplayStart, type Vehicle } from "@/lib/types";
 
 export function AutoDrivePage() {
   const { state, autoDrive, courseplay, connection, bridgeStatus, error, sendCommand, lastResult } =
     useLivemapContext();
   const [selected, setSelected] = useState<Vehicle | null>(null);
+  const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
   const [courseId, setCourseId] = useState("");
   const [lane, setLane] = useState(0);
   const [startAt, setStartAt] = useState<CourseplayStart>("first");
@@ -23,6 +25,14 @@ export function AutoDrivePage() {
     selected == null
       ? null
       : (state?.vehicles.find((vehicle) => vehicle.id === selected.id) ?? selected);
+  const livePlayer =
+    selectedPlayerId == null
+      ? null
+      : (state?.players?.find((player) => player.id === selectedPlayerId) ?? null);
+  const liveFarm =
+    livePlayer?.farmId == null
+      ? null
+      : (state?.farms?.find((farm) => farm.id === livePlayer.farmId) ?? null);
 
   useEffect(() => {
     const vehicle = new URLSearchParams(window.location.search).get("vehicle");
@@ -34,6 +44,7 @@ export function AutoDrivePage() {
     const vehicle = state.vehicles.find((item) => item.id === linkedVehicleId);
     if (!vehicle) return;
     setSelected(vehicle);
+    setSelectedPlayerId(null);
     appliedVehicle.current = linkedVehicleId;
   }, [linkedVehicleId, state]);
 
@@ -65,18 +76,42 @@ export function AutoDrivePage() {
     <div className="grid min-h-full grid-cols-1 min-[1536px]:h-full min-[1536px]:min-h-0 min-[1536px]:grid-cols-[minmax(0,1fr)_minmax(520px,38vw)] min-[1536px]:overflow-hidden">
       <MapSlot
         vehicles={state?.vehicles ?? []}
+        players={state?.multiplayer === true ? (state.players ?? []) : []}
+        farms={state?.farms ?? []}
         selectedId={liveSelected?.id}
-        onSelect={setSelected}
+        selectedPlayerId={livePlayer?.id}
+        onSelect={(vehicle) => {
+          setSelected(vehicle);
+          setSelectedPlayerId(null);
+        }}
+        onSelectPlayer={
+          state?.multiplayer === true
+            ? (player) => {
+                setSelected(null);
+                setSelectedPlayerId(player.id);
+              }
+            : undefined
+        }
+        showFarm={state?.multiplayer === true && (state.farms?.length ?? 0) > 1}
       >
         <Livemap
           state={state}
           autoDrive={networkReady ? autoDrive : null}
           selectedId={liveSelected?.id}
-          onSelectVehicle={setSelected}
+          selectedPlayerId={livePlayer?.id}
+          onSelectVehicle={(vehicle) => {
+            setSelected(vehicle);
+            setSelectedPlayerId(null);
+          }}
+          onSelectPlayer={(player) => {
+            setSelected(null);
+            setSelectedPlayerId(player.id);
+          }}
         />
       </MapSlot>
       <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1536px]:overflow-auto min-[1536px]:border-t-0 min-[1536px]:border-l">
         <ConnectionBanner connection={connection} bridgeStatus={bridgeStatus} error={error} />
+        <PlayerSheet player={livePlayer} farm={liveFarm} />
         {networkReady ? (
           <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5">
             <h2 className="text-[15px] font-semibold tracking-[0.04em] uppercase">AutoDrive</h2>
@@ -103,6 +138,7 @@ export function AutoDrivePage() {
           onStartAt={setStartAt}
           onCommand={sendCommand}
           lastResult={lastResult}
+          allowCommands={vehicleAllowsCommands(state, liveSelected)}
         />
         <VehicleSheet
           embedded
@@ -118,6 +154,7 @@ export function AutoDrivePage() {
           onOpenChange={() => {}}
           onCommand={sendCommand}
           lastResult={lastResult}
+          allowCommands={vehicleAllowsCommands(state, liveSelected)}
         />
       </aside>
     </div>

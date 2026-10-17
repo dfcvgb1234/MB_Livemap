@@ -138,8 +138,12 @@ export class LivemapSocket {
   }
 
   sendCommand(cmd: CommandMessage) {
+    return this.send(cmd);
+  }
+
+  send(message: unknown) {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(cmd));
+      this.ws.send(JSON.stringify(message));
       return true;
     }
     return false;

@@ -101,6 +101,57 @@ local function localPlayer()
     return nil
 end
 
+local function isHostedMultiplayer()
+    if g_dedicatedServer ~= nil or g_dedicatedServerInfo ~= nil then
+        return false
+    end
+    local mission = g_currentMission
+    if mission == nil then
+        return false
+    end
+    local info = mission.missionDynamicInfo
+    if type(info) ~= "table" or info.isMultiplayer ~= true then
+        return false
+    end
+    if mission.getIsServer ~= nil then
+        local ok, isServer = pcall(function()
+            return mission:getIsServer()
+        end)
+        if not ok or isServer ~= true then
+            return false
+        end
+    end
+    return true
+end
+
+local function rawOwnerFarmId(vehicle)
+    if vehicle ~= nil and vehicle.getOwnerFarmId ~= nil then
+        local ok, id = pcall(function()
+            return vehicle:getOwnerFarmId()
+        end)
+        if ok and type(id) == "number" then
+            return id
+        end
+    end
+    if vehicle ~= nil and type(vehicle.ownerFarmId) == "number" then
+        return vehicle.ownerFarmId
+    end
+    return nil
+end
+
+local function commandFarmId()
+    local player = localPlayer()
+    if player ~= nil and player.getFarmId ~= nil then
+        local ok, id = pcall(function()
+            return player:getFarmId()
+        end)
+        if ok and type(id) == "number" and id > 0 then
+            return id
+        end
+    end
+    return nil
+end
+
 local function ownerFarmId(vehicle)
     local farmId = nil
     if vehicle.getOwnerFarmId ~= nil then
@@ -202,6 +253,14 @@ function CommandHandler:handle(cmd)
     local vehicle = findVehicleById(cmd.vehicleId)
     if vehicle == nil then
         return { type = "commandResult", id = id, ok = false, error = "Vehicle not found" }
+    end
+
+    if isHostedMultiplayer() then
+        local owner = rawOwnerFarmId(vehicle)
+        local mine = commandFarmId()
+        if type(owner) ~= "number" or owner <= 0 or mine == nil or owner ~= mine then
+            return { type = "commandResult", id = id, ok = false, error = "Vehicle is not on your farm" }
+        end
     end
 
     local ok, err = pcall(function()

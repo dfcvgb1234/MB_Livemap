@@ -13,7 +13,7 @@
         </en>
     </description>
     <iconFilename>icon.png</iconFilename>
-    <multiplayer supported="false"/>
+    <multiplayer supported="true"/>
     <extraSourceFiles>
         <sourceFile filename="register.lua"/>
     </extraSourceFiles>

@@ -32,7 +32,13 @@ import {
   type StatusMessage,
 } from "./types.js";
 import { createMapOverlay } from "./mapOverlay.js";
-import { createMockAutoDrive, createMockCourseplay, startMockInjector } from "./mock.js";
+import {
+  createMockAutoDrive,
+  createMockCourseplay,
+  setMockFarmFilter,
+  setMockMultiplayer,
+  startMockInjector,
+} from "./mock.js";
 
 enableLogFile(process.env.MB_LIVEMAP_LOG ?? "");
 
@@ -51,6 +57,7 @@ const SETTINGS_DIR =
     "FS25_MB_Livemap",
   );
 const COMMAND_FILE = path.join(SETTINGS_DIR, "commands.xml");
+const FARM_FILE = path.join(SETTINGS_DIR, "farms.xml");
 const SESSION_FILE = path.join(SETTINGS_DIR, "session.xml");
 const COURSE_WATCH_FILE = path.join(SETTINGS_DIR, "coursewatch.txt");
 const TOKEN = process.env.MB_LIVEMAP_TOKEN ?? "";
@@ -241,6 +248,15 @@ function xmlAttr(value: string) {
     .replaceAll('"', "&quot;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function writeFarmFilter(farmIds: number[]) {
+  const ids = [...new Set(farmIds.filter((id) => Number.isInteger(id) && id > 0))].join(",");
+  const body = `<?xml version="1.0" encoding="utf-8" standalone="no"?>\n<farms ids="${xmlAttr(ids)}"/>\n`;
+  mkdirSync(SETTINGS_DIR, { recursive: true });
+  const tmp = `${FARM_FILE}.tmp`;
+  writeFileSync(tmp, body, "utf8");
+  renameSync(tmp, FARM_FILE);
 }
 
 function writeSessionFile() {
@@ -796,6 +812,20 @@ wss.on("connection", (ws, req) => {
       return;
     }
 
+    if (typed.type === "farmFilter") {
+      const raw = (msg as { farmIds?: unknown }).farmIds;
+      const farmIds = Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
+      try {
+        writeFarmFilter(farmIds);
+      } catch (err) {
+        console.warn("[farms] failed to write farm filter:", err instanceof Error ? err.message : err);
+        ws.send(JSON.stringify({ type: "error", message: "Could not save the farm filter" }));
+        return;
+      }
+      if (mockActive) setMockFarmFilter(farmIds);
+      return;
+    }
+
     if (typed.type === "ping") {
       ws.send(JSON.stringify({ type: "pong", ts: Date.now() }));
     }
@@ -889,6 +919,7 @@ app.get("/api/connect", async (c) => {
 
 if (!DESKTOP || MOCK) {
   app.post("/mock/start", (c) => {
+    setMockMultiplayer(c.req.query("mp") === "1");
     if (!mockActive) {
       mockActive = true;
       stopMock = startMockInjector(setState, 2, broadcast);
@@ -899,6 +930,7 @@ if (!DESKTOP || MOCK) {
   });
 
   app.post("/mock/stop", (c) => {
+    setMockMultiplayer(false);
     mockActive = false;
     stopMock?.();
     stopMock = null;

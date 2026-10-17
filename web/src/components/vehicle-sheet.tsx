@@ -342,6 +342,8 @@ type Props = {
   courseId?: string;
   cpLane?: number;
   cpStart?: CourseplayStart;
+  /** False for a vehicle that is not on the host's farm. Stats stay visible. */
+  allowCommands?: boolean;
 };
 
 export function VehicleSheet({
@@ -359,6 +361,7 @@ export function VehicleSheet({
   courseId = "",
   cpLane,
   cpStart,
+  allowCommands = true,
 }: Props) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -441,6 +444,7 @@ export function VehicleSheet({
             ? "Trailer"
             : (vehicle.type ?? "Vehicle")}{" "}
         · {Math.round(vehicle.speed)} km/h
+        {vehicle.farmName ? ` · ${vehicle.farmName}` : ""}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <Badge
@@ -495,7 +499,7 @@ export function VehicleSheet({
           </ul>
         )}
       </div>
-      {vehicle.category === "implement" || vehicle.category === "trailer" ? null : (
+      {!allowCommands || vehicle.category === "implement" || vehicle.category === "trailer" ? null : (
       <div className="mt-4 grid grid-cols-2 gap-3">
         <Button
           size="lg"
@@ -534,7 +538,7 @@ export function VehicleSheet({
         </Button>
       </div>
       )}
-      {drivable && mode === "livemap" && driverLabel ? (
+      {allowCommands && drivable && mode === "livemap" && driverLabel ? (
         <Link
           href={`/autodrive?vehicle=${encodeURIComponent(vehicle.id)}`}
           className="mt-3 flex min-h-12 items-center justify-center rounded-lg bg-[#e2b657] px-4 text-center text-sm font-semibold text-[#2a2112] hover:bg-[#ebc56f]"
@@ -542,7 +546,7 @@ export function VehicleSheet({
           Open in {driverLabel}
         </Link>
       ) : null}
-      {drivable && mode === "autodrive" && autoDriveAvailable ? (
+      {allowCommands && drivable && mode === "autodrive" && autoDriveAvailable ? (
         <AutoDriveControls
           vehicle={vehicle}
           destinations={destinations}

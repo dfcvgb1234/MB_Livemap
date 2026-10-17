@@ -182,6 +182,7 @@ function LivemapBridge:update(dt)
     if self.vehicleAccum >= VEHICLE_INTERVAL_MS then
         self.vehicleAccum = 0
         if self.tcp:isConnected() then
+            self.collector.enabledFarmIds = self.tcp.enabledFarmIds
             local snap = self.collector:buildSnapshot()
             self.tcp:sendLine(Json.encode(snap))
         end

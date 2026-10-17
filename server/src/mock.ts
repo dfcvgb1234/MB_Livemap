@@ -1,4 +1,4 @@
-import type { AutoDriveGraph, CourseplayCourses, GameState, LivemapNotification } from "./types.js";
+import type { AutoDriveGraph, CourseplayCourses, GameState, LivemapNotification, Vehicle } from "./types.js";
 
 const FRUITS = [
   "wheat",
@@ -56,6 +56,27 @@ const MOCK_NOTIFICATIONS: Array<Omit<LivemapNotification, "id" | "ts">> = [
     vehicleName: "Fendt 942",
   },
 ];
+
+const MOCK_MP =
+  process.env.MB_LIVEMAP_MOCK_MP === "1" || process.env.MB_LIVEMAP_MOCK_MP === "true";
+
+function multiplayerMock() {
+  return MOCK_MP || mockMpRuntime;
+}
+
+/** Farm ids the dashboard last enabled. Null keeps the host farm only. */
+let mockEnabledFarmIds: number[] | null = null;
+/** Turned on by `POST /mock/start?mp=1` so a running dev server can show the hosted UI. */
+let mockMpRuntime = false;
+
+export function setMockMultiplayer(enabled: boolean) {
+  mockMpRuntime = enabled;
+  if (!enabled) mockEnabledFarmIds = null;
+}
+
+export function setMockFarmFilter(farmIds: number[]) {
+  mockEnabledFarmIds = farmIds.filter((id) => Number.isInteger(id) && id > 0);
+}
 
 /** Deterministic-ish mock farm state that gently animates for demos. */
 export function createMockState(t = Date.now()): GameState {
@@ -168,6 +189,61 @@ export function createMockState(t = Date.now()): GameState {
     },
   ];
 
+  let listed: Vehicle[] = vehicles;
+  let multiplayer = false;
+  let localFarmId: number | null = null;
+  let farms: GameState["farms"];
+  let players: GameState["players"];
+  if (multiplayerMock()) {
+    listed = vehicles.map((vehicle) => ({ ...vehicle, farmId: 1, farmName: "My Farm" }));
+    listed.push({
+      id: "v-neighbor-1",
+      name: "John Deere 6R",
+      type: "tractor",
+      category: "vehicle",
+      x: -420,
+      z: -220 + Math.sin(rad) * 30,
+      heading: Math.PI,
+      speed: 6,
+      engineOn: true,
+      occupied: true,
+      attached: ["Cultivator"],
+      fills: [{ name: "Diesel", fillLevel: 180, capacity: 400 }],
+      damage: 0.2,
+      farmId: 2,
+      farmName: "North Fields",
+    });
+    const enabled = mockEnabledFarmIds ?? [1];
+    listed = listed.filter((vehicle) => {
+      const farmId = vehicle.farmId;
+      return farmId == null || farmId <= 0 || enabled.includes(farmId);
+    });
+    multiplayer = true;
+    localFarmId = 1;
+    farms = [
+      { id: 1, name: "My Farm", color: "#e2b657", balance: 248500, loan: 150000, equity: 980000 },
+      { id: 2, name: "North Fields", color: "#7eb6ff", balance: 81200, loan: 0, equity: 240000 },
+    ];
+    players = [
+      {
+        id: "local|Host",
+        name: "Host",
+        x: Math.cos(rad) * 180,
+        z: Math.sin(rad) * 140,
+        heading: ((phase + 90) % 360) * (Math.PI / 180),
+        farmId: 1,
+      },
+      {
+        id: "user|2|Alex",
+        name: "Alex",
+        x: -380,
+        z: 260 + Math.cos(rad) * 24,
+        heading: Math.PI / 2,
+        farmId: 2,
+      },
+    ];
+  }
+
   const fields = Array.from({ length: 12 }, (_, i) => {
     const col = i % 4;
     const row = Math.floor(i / 4);
@@ -247,7 +323,8 @@ export function createMockState(t = Date.now()): GameState {
       day: (Math.floor(t / 8000) % 3) + 1,
       daysPerPeriod: 3,
     },
-    vehicles,
+    vehicles: listed,
+    ...(multiplayer ? { multiplayer: true as const, localFarmId, farms, players } : {}),
     weather: {
       condition,
       temperatureC,
