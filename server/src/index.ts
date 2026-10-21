@@ -8,6 +8,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { serve } from "@hono/node-server";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import QRCode from "qrcode";
 import {
   enableLogFile,
@@ -30,6 +31,7 @@ import {
   type NotificationKind,
   type NotificationLevel,
   type StatusMessage,
+  type WhitelistAction,
 } from "./types.js";
 import { createMapOverlay } from "./mapOverlay.js";
 import { createSettingsStore } from "./settingsStore.js";
@@ -40,6 +42,7 @@ import {
   setMockMultiplayer,
   startMockInjector,
 } from "./mock.js";
+import { handleMcpHttp } from "./mcpHttp.js";
 
 enableLogFile(process.env.MB_LIVEMAP_LOG ?? "");
 
@@ -65,6 +68,8 @@ const TOKEN = process.env.MB_LIVEMAP_TOKEN ?? "";
 const STATIC_ROOT = staticRootFromEnv();
 const DESKTOP = STATIC_ROOT !== "";
 const WEB_PORT = Number(process.env.MB_LIVEMAP_PORT ?? 43127);
+// The HTTP MCP handler reads state through the local bridge client. Always use this process.
+process.env.MB_LIVEMAP_HTTP = `http://127.0.0.1:${DESKTOP ? WEB_PORT : HTTP_PORT}`;
 const modInstall = installBundledMod(SETTINGS_DIR);
 const overlay = createMapOverlay(SETTINGS_DIR);
 const settingsStore = createSettingsStore(SETTINGS_DIR);
@@ -396,10 +401,113 @@ function sendToMod(line: string) {
   return true;
 }
 
+const AD_MODES = new Set(["drive", "pickup", "deliver", "load", "unload", "fieldwork"]);
+const CP_STARTS = new Set(["first", "nearest", "last"]);
+
+function isLoopbackAddress(address: string | undefined) {
+  if (!address) return false;
+  const host = address.toLowerCase().replace(/^::ffff:/, "");
+  return host === "127.0.0.1" || host === "::1";
+}
+
+function isLoopback(c: Parameters<typeof getConnInfo>[0]) {
+  try {
+    return isLoopbackAddress(getConnInfo(c).remote.address);
+  } catch {
+    return false;
+  }
+}
+
+function isWhitelistAction(value: string): value is WhitelistAction {
+  return WHITELIST.has(value);
+}
+
+function commandFromBody(body: unknown): CommandMessage | { error: string } {
+  if (!body || typeof body !== "object") return { error: "Invalid command" };
+  const raw = body as Record<string, unknown>;
+  if (typeof raw.action !== "string" || raw.action === "") return { error: "command requires action" };
+  if (!isWhitelistAction(raw.action)) return { error: `Unsupported action: ${raw.action}` };
+  if (typeof raw.vehicleId !== "string" || raw.vehicleId === "") return { error: "command requires vehicleId" };
+
+  const cmd: CommandMessage = {
+    type: "command",
+    id: typeof raw.id === "string" && raw.id !== "" ? raw.id : randomUUID(),
+    action: raw.action,
+    vehicleId: raw.vehicleId,
+  };
+  if (raw.targetId !== undefined) {
+    if (typeof raw.targetId !== "string" || raw.targetId === "") return { error: "targetId must be a string" };
+    cmd.targetId = raw.targetId;
+  }
+  if (raw.secondTargetId !== undefined) {
+    if (typeof raw.secondTargetId !== "string" || raw.secondTargetId === "") {
+      return { error: "secondTargetId must be a string" };
+    }
+    cmd.secondTargetId = raw.secondTargetId;
+  }
+  if (raw.fillType !== undefined) {
+    if (typeof raw.fillType !== "string" || raw.fillType === "") return { error: "fillType must be a string" };
+    cmd.fillType = raw.fillType;
+  }
+  if (raw.mode !== undefined) {
+    if (typeof raw.mode !== "string" || !AD_MODES.has(raw.mode)) return { error: "Unknown AutoDrive mode" };
+    cmd.mode = raw.mode as CommandMessage["mode"];
+  }
+  if (raw.cpStart !== undefined) {
+    if (typeof raw.cpStart !== "string" || !CP_STARTS.has(raw.cpStart)) return { error: "Unknown Courseplay start" };
+    cmd.cpStart = raw.cpStart as CommandMessage["cpStart"];
+  }
+  if (raw.cpLane !== undefined) {
+    if (typeof raw.cpLane !== "number" || !Number.isFinite(raw.cpLane)) return { error: "cpLane must be a number" };
+    cmd.cpLane = raw.cpLane;
+  }
+  return cmd;
+}
+
+const commandWaiters = new Map<string, (result: CommandResult) => void>();
+
 function replyToClient(from: WebSocket | undefined, result: CommandResult) {
   if (from && from.readyState === from.OPEN) {
     from.send(JSON.stringify(result));
   }
+  const waiter = commandWaiters.get(result.id);
+  if (waiter) {
+    commandWaiters.delete(result.id);
+    waiter(result);
+  }
+}
+
+/** Resolves with the mod's commandResult, or the mock result when that finishes inline. */
+function submitCommand(cmd: CommandMessage): Promise<CommandResult> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: CommandResult) => {
+      if (settled) return;
+      settled = true;
+      commandWaiters.delete(cmd.id);
+      resolve(result);
+    };
+    commandWaiters.set(cmd.id, finish);
+    try {
+      handleCommand(cmd);
+    } catch (err) {
+      finish({
+        type: "commandResult",
+        id: cmd.id,
+        ok: false,
+        error: err instanceof Error ? err.message : "Command failed",
+      });
+      return;
+    }
+    if (!pendingCommands.has(cmd.id) && !settled) {
+      finish({
+        type: "commandResult",
+        id: cmd.id,
+        ok: false,
+        error: "Command was not completed",
+      });
+    }
+  });
 }
 
 function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
@@ -909,6 +1017,43 @@ app.get("/health", (c) =>
 
 app.get("/state", (c) => c.json(latestState));
 
+app.get("/autodrive", (c) =>
+  c.json({
+    available: latestAutoDrive.available === true,
+    markers: latestAutoDrive.available ? (latestAutoDrive.markers ?? []) : [],
+  }),
+);
+
+app.get("/courseplay", (c) =>
+  c.json({
+    available: latestCourseplay.available === true,
+    courses: latestCourseplay.available ? (latestCourseplay.courses ?? []) : [],
+  }),
+);
+
+app.all("/mcp", async (c) => {
+  if (!isLoopback(c)) {
+    return c.json({ error: "MCP is only accepted from this computer" }, 403);
+  }
+  return handleMcpHttp(c.req.raw);
+});
+
+app.post("/api/command", async (c) => {
+  if (!isLoopback(c)) {
+    return c.json({ error: "Commands are only accepted from this computer" }, 403);
+  }
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+  const parsed = commandFromBody(body);
+  if ("error" in parsed) return c.json({ error: parsed.error }, 400);
+  const result = await submitCommand(parsed);
+  return c.json(result);
+});
+
 app.get("/api/settings", (c) => c.json(settingsStore.response()));
 
 app.put("/api/settings", async (c) => {
@@ -1036,6 +1181,6 @@ if (MOCK) {
 
 console.log(
   DESKTOP
-    ? `[bridge] ready — desktop http://0.0.0.0:${WEB_PORT} · PIPE ${PIPE_PATH}${MOCK ? " · MOCK" : ""}`
-    : `[bridge] ready — TCP ${TCP_PORT} · PIPE ${PIPE_PATH} · WS ${WS_PORT} · HTTP ${HTTP_PORT}${MOCK ? " · MOCK" : ""}`,
+    ? `[bridge] ready — desktop http://0.0.0.0:${WEB_PORT} · MCP http://127.0.0.1:${WEB_PORT}/mcp · PIPE ${PIPE_PATH}${MOCK ? " · MOCK" : ""}`
+    : `[bridge] ready — TCP ${TCP_PORT} · PIPE ${PIPE_PATH} · WS ${WS_PORT} · HTTP ${HTTP_PORT} · MCP http://127.0.0.1:${HTTP_PORT}/mcp${MOCK ? " · MOCK" : ""}`,
 );

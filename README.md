@@ -64,6 +64,14 @@ From the vehicle sheet on the livemap:
 
 Unknown actions are rejected by the bridge and the mod.
 
+AutoDrive adds destination listing plus `autodrive.start` / `autodrive.stop` (including a fieldwork mode that runs a Courseplay course). Courseplay adds the saved-course list plus `courseplay.start` / `courseplay.stop`. Precision Farming adds soil type, pH, and nitrogen on each field. Those show up only while the corresponding mod is loaded.
+
+## AI / MCP
+
+An MCP server in `server/` lets an assistant read fields, vehicles, weather, the crop calendar, productions, and animals, and run the same whitelisted commands. Start the bridge first (`npm run dev`, `npm run mock`, or the desktop app). It serves Streamable HTTP MCP at `http://127.0.0.1:18767/mcp` in development and `http://127.0.0.1:43127/mcp` for the packaged app. That is the server URL for a client that asks for one. Cursor can instead enable the **mb-livemap** stdio server from `.vscode/mcp.json`. Set `MB_LIVEMAP_HTTP` when that stdio server should talk to a bridge on another address.
+
+AutoDrive commands are `list_autodrive_destinations`, `start_autodrive`, and `stop_autodrive`. Courseplay commands are `list_courseplay_courses`, `start_courseplay`, and `stop_courseplay`. They stay in the tool list; a call returns an error when that mod is not loaded. Precision Farming adds soil type, pH, and nitrogen on the field tools while it is active. The server is not part of the player installer.
+
 ## Map background
 
 Place an optional top-down map PNG at `web/public/map-overlay.png` (from your map pack). Vehicles and field tints still work without it.
@@ -79,6 +87,7 @@ Place an optional top-down map PNG at `web/public/map-overlay.png` (from your ma
 | `MB_LIVEMAP_HTTP_PORT` | `18767` | Health / mock control HTTP |
 | `MB_LIVEMAP_MOCK` | unset | `1` to enable mock injector |
 | `MB_LIVEMAP_TOKEN` | unset | Optional WS auth token |
+| `MB_LIVEMAP_HTTP` | `http://127.0.0.1:18767`, then `:43127` | Bridge URL for the MCP server |
 | `NEXT_PUBLIC_WS_URL` | `ws://<host>:18766` | Override WS URL in the webapp |
 
 ## Out of scope (v1)
