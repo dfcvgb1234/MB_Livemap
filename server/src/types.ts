@@ -66,6 +66,14 @@ export type Weather = {
   daily: WeatherPoint[] | null;
 };
 
+export type FieldPrecision = {
+  soilType: string | null;
+  ph: number | null;
+  phStatus: string | null;
+  nitrogen: number | null;
+  nitrogenTarget: number | null;
+};
+
 export type Field = {
   id: string;
   name?: string | null;
@@ -77,6 +85,18 @@ export type Field = {
   x: number | null;
   z: number | null;
   polygon: Array<{ x: number; z: number }> | null;
+  areaHa?: number | null;
+  cropState?: string | null;
+  needsRolling?: boolean | null;
+  needsFertilizer?: boolean | null;
+  fertilizerLevel?: number | null;
+  fertilizerMax?: number | null;
+  needsSpraying?: boolean | null;
+  weeds?: string | null;
+  needsPlowing?: boolean | null;
+  needsLime?: boolean | null;
+  needsStones?: boolean | null;
+  precisionFarming?: FieldPrecision | null;
 };
 
 export type ProductionFill = {

@@ -255,8 +255,13 @@ export function createMockState(t = Date.now()): GameState {
     const fruit = FRUITS[i % FRUITS.length];
     const growthMax = 8;
     const growthState = clamp(Math.floor(((phase / 40 + i * 1.7) % growthMax) + 1), 1, growthMax);
+    const cropState = growthState >= growthMax - 1 ? "Ready to harvest" : "Growing";
+    const fertilizerLevel = i % 3;
+    const soils = ["Loam", "Sandy Loam", "Silty Clay", "Loamy Sand"] as const;
+    const phStatuses = ["Optimal", "Low", "High"] as const;
     return {
       id: `field-${i + 1}`,
+      name: String(i + 1),
       fruitType: fruit,
       growthState,
       growthMax,
@@ -269,6 +274,27 @@ export function createMockState(t = Date.now()): GameState {
         { x: ox + w, z: oz + h },
         { x: ox, z: oz + h },
       ],
+      areaHa: Math.round(((w * h) / 10000) * 100) / 100,
+      cropState,
+      needsRolling: cropState === "Growing" && growthState <= 3,
+      needsFertilizer: fertilizerLevel < 2,
+      fertilizerLevel,
+      fertilizerMax: 2,
+      weeds: (["None", "Growing", "Small", "Medium", "Large", "Partial", "Withered"] as const)[i % 7],
+      needsSpraying: i % 7 !== 0 && i % 7 !== 6,
+      needsPlowing: i % 4 === 0,
+      needsLime: i % 5 === 0,
+      needsStones: null,
+      precisionFarming:
+        i % 4 === 0
+          ? {
+              soilType: soils[i % soils.length] ?? "Loam",
+              ph: Math.round((5.8 + (i % 5) * 0.35) * 100) / 100,
+              phStatus: phStatuses[i % phStatuses.length] ?? "Optimal",
+              nitrogen: 70 + i * 12,
+              nitrogenTarget: 160,
+            }
+          : null,
     };
   });
 

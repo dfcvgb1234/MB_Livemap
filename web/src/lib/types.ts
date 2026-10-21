@@ -77,6 +77,16 @@ export type Weather = {
   daily: WeatherPoint[] | null;
 };
 
+export type FieldPrecision = {
+  soilType: string | null;
+  ph: number | null;
+  /** Low, Optimal, or High when the mod reports an optimal range. */
+  phStatus: string | null;
+  /** Kilograms of nitrogen per hectare. */
+  nitrogen: number | null;
+  nitrogenTarget: number | null;
+};
+
 export type Field = {
   id: string;
   /** Number shown on the in-game map, when the mod can read it. */
@@ -90,6 +100,24 @@ export type Field = {
   x: number | null;
   z: number | null;
   polygon: Array<{ x: number; z: number }> | null;
+  /** Field area in hectares. */
+  areaHa?: number | null;
+  /** Growing, Ready to harvest, Withered, Harvested, or a ground label. */
+  cropState?: string | null;
+  needsRolling?: boolean | null;
+  needsFertilizer?: boolean | null;
+  /** Fertilizer applications already on the field. Vanilla only. */
+  fertilizerLevel?: number | null;
+  fertilizerMax?: number | null;
+  /** Weeds that still need a pass. Withered weeds were already sprayed. */
+  needsSpraying?: boolean | null;
+  /** None, Growing, Small, Medium, Large, Partial, or Withered. Hidden when weeds are off. */
+  weeds?: string | null;
+  needsPlowing?: boolean | null;
+  needsLime?: boolean | null;
+  needsStones?: boolean | null;
+  /** Present only while the official Precision Farming mod is active. */
+  precisionFarming?: FieldPrecision | null;
 };
 
 export type ProductionFill = {

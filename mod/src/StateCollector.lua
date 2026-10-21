@@ -470,7 +470,7 @@ local function pointsFromNode(root)
 end
 
 -- FS25 stores each field outline as child nodes of polygonPoints (node ids, not coordinates).
-local function outlineFromField(field)
+local function rawOutlineFromField(field)
     local points = {}
     if type(field.polygonPoints) == "table" then
         for _, node in ipairs(field.polygonPoints) do
@@ -487,7 +487,7 @@ local function outlineFromField(field)
             points = pointsFromNode(root) or {}
         end
     end
-    return simplifyPolygon(points)
+    return points
 end
 
 local function sampleFieldFruit(x, z)
@@ -523,6 +523,1181 @@ local function sampleFieldFruit(x, z)
     return fruitNameFromIndex(fruitIndex), growthState, growthMax
 end
 
+local function positiveNumber(value)
+    if type(value) ~= "number" or value ~= value or value <= 0 or value == math.huge then
+        return nil
+    end
+    return value
+end
+
+local function round2(value)
+    return math.floor(value * 100 + 0.5) / 100
+end
+
+-- A real field is well under 500 ha. Larger numbers are world area in m².
+local function asHectares(value)
+    local amount = positiveNumber(value)
+    if amount == nil then
+        return nil
+    end
+    if amount > 500 then
+        amount = amount / 10000
+    end
+    return round2(amount)
+end
+
+local function polygonAreaHa(points)
+    if type(points) ~= "table" or #points < 3 then
+        return nil
+    end
+    local sum = 0
+    for i = 1, #points do
+        local current = points[i]
+        local nxt = points[(i % #points) + 1]
+        if type(current) ~= "table" or type(nxt) ~= "table" then
+            return nil
+        end
+        if type(current.x) ~= "number" or type(current.z) ~= "number" or type(nxt.x) ~= "number" or type(nxt.z) ~= "number" then
+            return nil
+        end
+        sum = sum + (current.x * nxt.z - nxt.x * current.z)
+    end
+    local squareMeters = math.abs(sum) * 0.5
+    if squareMeters <= 0 then
+        return nil
+    end
+    return round2(squareMeters / 10000)
+end
+
+local function fieldAreaHa(field, farmland, points)
+    local area = asHectares(field.areaHa)
+    if area ~= nil then
+        return area
+    end
+    if type(field.getAreaHa) == "function" then
+        area = asHectares(safeCall(function()
+            return field:getAreaHa()
+        end, nil))
+        if area ~= nil then
+            return area
+        end
+    end
+    if type(farmland) == "table" then
+        area = asHectares(farmland.areaInHa or farmland.areaHa)
+        if area ~= nil then
+            return area
+        end
+    end
+    return polygonAreaHa(points)
+end
+
+local function fruitDescFromIndex(index)
+    if not isKnownFruit(index) or g_fruitTypeManager == nil or g_fruitTypeManager.getFruitTypeByIndex == nil then
+        return nil
+    end
+    local desc = safeCall(function()
+        return g_fruitTypeManager:getFruitTypeByIndex(index)
+    end, nil)
+    if type(desc) == "table" then
+        return desc
+    end
+    return nil
+end
+
+local function groundMatches(groundType, names)
+    if FieldGroundType == nil or type(groundType) ~= "number" then
+        return false
+    end
+    for _, name in ipairs(names) do
+        if FieldGroundType[name] ~= nil and groundType == FieldGroundType[name] then
+            return true
+        end
+    end
+    return false
+end
+
+local function groundStateLabel(groundType)
+    if FieldGroundType == nil or type(groundType) ~= "number" then
+        return nil
+    end
+    if groundMatches(groundType, { "NONE" }) then
+        return "Empty"
+    end
+    if groundMatches(groundType, { "STUBBLE_TILLAGE", "GRASS_CUT" }) then
+        return "Harvested"
+    end
+    if groundMatches(groundType, { "CULTIVATED" }) then
+        return "Cultivated"
+    end
+    if groundMatches(groundType, { "PLOWED" }) then
+        return "Plowed"
+    end
+    if groundMatches(groundType, { "SEEDBED" }) then
+        return "Seedbed"
+    end
+    if groundMatches(groundType, { "ROLLER_LINES", "ROLLED_SEEDBED" }) then
+        return "Rolled"
+    end
+    if groundMatches(groundType, { "HARVEST_READY" }) then
+        return "Ready to harvest"
+    end
+    if groundMatches(groundType, { "SOWN", "DIRECT_SOWN", "PLANTED", "RIDGE", "RIDGES", "RICE_PLANTED", "GRASS" }) then
+        return "Growing"
+    end
+    return nil
+end
+
+local function isGrassFruit(fruitIndex, desc)
+    if FruitType ~= nil and FruitType.GRASS ~= nil and fruitIndex == FruitType.GRASS then
+        return true
+    end
+    if type(desc) == "table" and type(desc.name) == "string" and string.upper(desc.name) == "GRASS" then
+        return true
+    end
+    return false
+end
+
+local function cropStateFrom(fruitIndex, growthState, growthMax, groundType)
+    if isKnownFruit(fruitIndex) and type(growthState) == "number" then
+        local desc = fruitDescFromIndex(fruitIndex)
+        if type(desc) == "table" then
+            local minHarvest = desc.minHarvestingGrowthState
+            local maxHarvest = desc.maxHarvestingGrowthState
+            if type(minHarvest) == "number" and type(maxHarvest) == "number" and growthState >= minHarvest and growthState <= maxHarvest then
+                return "Ready to harvest"
+            end
+            local minForage = desc.minForageGrowthState
+            if type(minForage) == "number" and growthState >= minForage and (type(minHarvest) ~= "number" or growthState < minHarvest) then
+                local maxForage = desc.maxForageGrowthState
+                if type(maxForage) ~= "number" or growthState <= maxForage then
+                    return "Ready to harvest"
+                end
+            end
+            if type(maxHarvest) == "number" and growthState > maxHarvest then
+                local minPrepare = desc.minPreparingGrowthState
+                if type(minPrepare) == "number" and growthState >= minPrepare then
+                    return "Harvested"
+                end
+                return "Withered"
+            end
+        elseif type(growthMax) == "number" and growthMax > 0 and growthState >= growthMax then
+            return "Ready to harvest"
+        end
+        if growthState > 0 then
+            return "Growing"
+        end
+        return "Harvested"
+    end
+    return groundStateLabel(groundType)
+end
+
+local function missionFlag(names)
+    local info = g_currentMission and g_currentMission.missionInfo
+    if type(info) ~= "table" then
+        return nil
+    end
+    for _, name in ipairs(names) do
+        if type(info[name]) == "boolean" then
+            return info[name]
+        end
+    end
+    return nil
+end
+
+-- Disabled mechanics are null so the card can hide them. Unknown settings still report the field.
+local function flagNeed(enabled, needed)
+    if enabled == false then
+        return nil
+    end
+    return needed
+end
+
+-- Titles match data/maps/maps_weed.xml fieldInfoStates. States 1-2 share the
+-- invisible growing title. States 7-9 are the withered result of herbicide.
+local function weedLabel(state)
+    if type(state) ~= "number" then
+        return nil
+    end
+    local index = math.floor(state + 0.5)
+    if index <= 0 then
+        return "None"
+    end
+    if index <= 2 then
+        return "Growing"
+    end
+    if index == 3 then
+        return "Small"
+    end
+    if index == 4 then
+        return "Medium"
+    end
+    if index == 5 then
+        return "Large"
+    end
+    if index == 6 then
+        return "Partial"
+    end
+    if index <= 9 then
+        return "Withered"
+    end
+    return nil
+end
+
+local function fertilizerApplicationsMax()
+    local maxValue = safeCall(function()
+        local mission = g_currentMission
+        if mission == nil or mission.fieldGroundSystem == nil or mission.fieldGroundSystem.getMaxValue == nil then
+            return nil
+        end
+        if FieldDensityMap == nil or FieldDensityMap.SPRAY_LEVEL == nil then
+            return nil
+        end
+        return mission.fieldGroundSystem:getMaxValue(FieldDensityMap.SPRAY_LEVEL)
+    end, nil)
+    if type(maxValue) == "number" and maxValue > 0 then
+        return maxValue
+    end
+    return 2
+end
+
+local function fieldNeedsRolling(sampled, fruitIndex, desc)
+    if type(sampled) ~= "table" or type(sampled.rollerLevel) ~= "number" then
+        return nil
+    end
+    if isGrassFruit(fruitIndex, desc) or groundMatches(sampled.groundType, { "GRASS", "GRASS_CUT" }) then
+        return false
+    end
+    local sown = isKnownFruit(fruitIndex) and type(sampled.growthState) == "number" and sampled.growthState > 0
+    if not sown then
+        sown = groundMatches(sampled.groundType, {
+            "SOWN",
+            "DIRECT_SOWN",
+            "PLANTED",
+            "RIDGE",
+            "RIDGES",
+            "RICE_PLANTED",
+            "ROLLER_LINES",
+            "ROLLED_SEEDBED",
+        })
+    end
+    if not sown then
+        return false
+    end
+    return sampled.rollerLevel <= 0
+end
+
+local PF_MOD_NAMES = { "FS25_precisionFarming", "FS25_PrecisionFarming" }
+-- Names from the FS25 Precision Farming scripts. The documented readers come first
+-- so a similarly named helper cannot win just by existing.
+local PF_SOIL_METHODS = {
+    "getTypeIndexAtWorldPos",
+    "getSoilTypeIndexAtWorldPos",
+    "getSoilTypeAtWorldPos",
+    "getSoilTypeIndexAtWorldPosition",
+    "getValueAtWorldPos",
+}
+local PF_PH_METHODS = {
+    "getLevelAtWorldPos",
+    "getPhValueAtWorldPos",
+    "getPHValueAtWorldPos",
+    "getPhAtWorldPos",
+    "getValueAtWorldPos",
+}
+local PF_NITROGEN_METHODS = {
+    "getLevelAtWorldPos",
+    "getNitrogenAmountAtWorldPos",
+    "getNitrogenLevelAtWorldPos",
+    "getNitrogenValueAtWorldPos",
+    "getAmountAtWorldPos",
+    "getValueAtWorldPos",
+}
+local PF_PH_RANGE_METHODS = {
+    "getOptimalPHRangeAtWorldPos",
+    "getOptimalPhRangeAtWorldPos",
+    "getOptimalPHAtWorldPos",
+    "getPhRangeAtWorldPos",
+}
+local PF_NITROGEN_TARGET_METHODS = {
+    "getTargetLevelAtWorldPos",
+    "getNitrogenTargetAtWorldPos",
+    "getTargetNitrogenAtWorldPos",
+    "getOptimalNitrogenAtWorldPos",
+    "getTargetAmountAtWorldPos",
+}
+local PF_SOIL_FALLBACK = {
+    [1] = "Loamy Sand",
+    [2] = "Sandy Loam",
+    [3] = "Loam",
+    [4] = "Silty Clay",
+}
+
+local function firstFunction(source, names)
+    if type(source) ~= "table" then
+        return nil
+    end
+    for _, name in ipairs(names) do
+        if type(source[name]) == "function" then
+            return name
+        end
+    end
+    return nil
+end
+
+-- Documented readers win. Any other *WorldPos method is only a fallback.
+local function worldReader(source, names)
+    local method = firstFunction(source, names)
+    if method ~= nil then
+        return method
+    end
+    if type(source) ~= "table" then
+        return nil
+    end
+    local fallback = nil
+    for key, value in pairs(source) do
+        if type(key) == "string" and type(value) == "function" and string.find(key, "WorldPos", 1, true) ~= nil then
+            local lower = string.lower(key)
+            if string.find(lower, "target", 1, true) == nil and string.find(lower, "optimal", 1, true) == nil then
+                return key
+            end
+            if fallback == nil then
+                fallback = key
+            end
+        end
+    end
+    return fallback
+end
+
+-- Two targets, not an array: a nil map must not stop the search before the mod instance.
+local function bindFunction(first, second, names)
+    local method = firstFunction(first, names)
+    if method ~= nil then
+        return first, method
+    end
+    method = firstFunction(second, names)
+    if method ~= nil then
+        return second, method
+    end
+    return nil, nil
+end
+
+local function namedTable(source, names)
+    if type(source) ~= "table" then
+        return nil
+    end
+    for _, name in ipairs(names) do
+        if type(source[name]) == "table" then
+            return source[name]
+        end
+    end
+    return nil
+end
+
+local function modEnvironment(mod)
+    if type(mod) ~= "table" then
+        return nil
+    end
+    if type(mod.modEnv) == "table" then
+        return mod.modEnv
+    end
+    if type(mod.environment) == "table" then
+        return mod.environment
+    end
+    return nil
+end
+
+local function singletonFromEnv(env)
+    if type(env) ~= "table" then
+        return nil
+    end
+    if type(env.g_precisionFarming) == "table" then
+        return env.g_precisionFarming
+    end
+    if type(env.PrecisionFarming) == "table" and type(env.PrecisionFarming.INSTANCE) == "table" then
+        return env.PrecisionFarming.INSTANCE
+    end
+    if type(env.soilMap) == "table" and (type(env.nitrogenMap) == "table" or type(env.pHMap) == "table" or type(env.phMap) == "table" or type(env.tramlineMap) == "table") then
+        return env
+    end
+    return nil
+end
+
+local function functionEnv(fn)
+    if type(fn) ~= "function" or getfenv == nil then
+        return nil
+    end
+    local ok, env = pcall(getfenv, fn)
+    if ok and type(env) == "table" then
+        return env
+    end
+    return nil
+end
+
+local function functionUpvalue(fn, index)
+    if debug == nil or debug.getupvalue == nil then
+        return nil
+    end
+    local ok, name, value = pcall(debug.getupvalue, fn, index)
+    if not ok then
+        return nil
+    end
+    return name, value
+end
+
+-- Precision Farming keeps g_precisionFarming in its own mod environment.
+-- A function defined there still has that environment, even from another mod.
+local function singletonFromFunction(fn, depth, seen)
+    if type(fn) ~= "function" or depth > 4 or seen[fn] then
+        return nil
+    end
+    seen[fn] = true
+    local env = functionEnv(fn)
+    if env == nil or env == _G then
+        return nil
+    end
+    local found = singletonFromEnv(env)
+    if found ~= nil then
+        return found
+    end
+    for index = 1, 8 do
+        local name, value = functionUpvalue(fn, index)
+        if name == nil then
+            break
+        end
+        if type(value) == "function" then
+            found = singletonFromFunction(value, depth + 1, seen)
+            if found ~= nil then
+                return found
+            end
+        else
+            found = singletonFromEnv(value)
+            if found ~= nil then
+                return found
+            end
+        end
+    end
+    return nil
+end
+
+local function mapsFromModule(module)
+    if type(module) ~= "table" then
+        return nil
+    end
+    local soil = module.soilMap
+    local nitrogen = module.nitrogenMap
+    local ph = module.pHMap or module.phMap
+    if type(soil) ~= "table" and type(nitrogen) ~= "table" and type(ph) ~= "table" then
+        return nil
+    end
+    return {
+        instance = module,
+        soilMap = type(soil) == "table" and soil or nil,
+        nitrogenMap = type(nitrogen) == "table" and nitrogen or nil,
+        phMap = type(ph) == "table" and ph or nil,
+    }
+end
+
+local function mapsComplete(maps)
+    return type(maps) == "table" and maps.soilMap ~= nil and maps.nitrogenMap ~= nil and maps.phMap ~= nil
+end
+
+local function absorbMaps(into, extra)
+    if extra == nil then
+        return into
+    end
+    if into == nil then
+        return {
+            instance = extra.instance,
+            soilMap = extra.soilMap,
+            nitrogenMap = extra.nitrogenMap,
+            phMap = extra.phMap,
+        }
+    end
+    if into.instance == nil then
+        into.instance = extra.instance
+    end
+    if into.soilMap == nil then
+        into.soilMap = extra.soilMap
+    end
+    if into.nitrogenMap == nil then
+        into.nitrogenMap = extra.nitrogenMap
+    end
+    if into.phMap == nil then
+        into.phMap = extra.phMap
+    end
+    return into
+end
+
+local function moduleFromFunctions(source, seenFunctions)
+    if type(source) ~= "table" then
+        return nil
+    end
+    local checked = 0
+    local functionsChecked = 0
+    for _, value in pairs(source) do
+        checked = checked + 1
+        if checked > 80 then
+            break
+        end
+        if type(value) == "function" then
+            functionsChecked = functionsChecked + 1
+            local maps = mapsFromModule(singletonFromEnv(functionEnv(value)))
+            if maps ~= nil then
+                return maps
+            end
+            -- One method defined inside Precision Farming is enough.
+            if functionsChecked >= 4 then
+                break
+            end
+        end
+    end
+    return nil
+end
+
+-- Courseplay reads these as spec_FS25_precisionFarming.<name> on the vehicle.
+local PF_SPEC_SUFFIXES = {
+    "extendedSprayer",
+    "extendedSowingMachine",
+    "extendedCombine",
+    "extendedMower",
+    "cropSensor",
+    "soilSampler",
+    "manureSensor",
+    "weedSpotSpray",
+    "precisionFarmingStatistic",
+    "extendedMotorized",
+    "extendedWearable",
+    "extendedSprayerEffects",
+    "rtkStation",
+}
+
+local function mapsFromVehicleSpecs(object, seenFunctions)
+    if type(object) ~= "table" then
+        return nil
+    end
+    local merged = nil
+    for _, suffix in ipairs(PF_SPEC_SUFFIXES) do
+        local spec = object["spec_FS25_precisionFarming." .. suffix]
+        if type(spec) ~= "table" then
+            spec = object["spec_" .. suffix]
+        end
+        if type(spec) == "table" then
+            local viaEnv = moduleFromFunctions(spec, seenFunctions)
+            if mapsComplete(viaEnv) then
+                return viaEnv
+            end
+            merged = absorbMaps(merged, viaEnv)
+            merged = absorbMaps(merged, mapsFromModule(spec))
+            if type(spec.pfModule) == "table" then
+                merged = absorbMaps(merged, mapsFromModule(spec.pfModule))
+            end
+            if mapsComplete(merged) then
+                return merged
+            end
+        end
+    end
+    return merged
+end
+
+local function mapsFromTypeManager(manager, seenFunctions, seenClasses)
+    if type(manager) ~= "table" or type(manager.types) ~= "table" then
+        return nil
+    end
+    local merged = nil
+    for _, typeDef in pairs(manager.types) do
+        if type(typeDef) == "table" then
+            local groups = {}
+            if type(typeDef.specializations) == "table" then
+                groups[#groups + 1] = typeDef.specializations
+            end
+            if type(typeDef.eventListeners) == "table" then
+                for _, listeners in pairs(typeDef.eventListeners) do
+                    if type(listeners) == "table" then
+                        groups[#groups + 1] = listeners
+                    end
+                end
+            end
+            for _, group in ipairs(groups) do
+                for _, spec in pairs(group) do
+                    local maps = nil
+                    if type(spec) == "table" and not seenClasses[spec] then
+                        seenClasses[spec] = true
+                        maps = moduleFromFunctions(spec, seenFunctions)
+                    elseif type(spec) == "function" then
+                        maps = mapsFromModule(singletonFromEnv(functionEnv(spec)))
+                    end
+                    if mapsComplete(maps) then
+                        return maps
+                    end
+                    merged = absorbMaps(merged, maps)
+                end
+            end
+        end
+    end
+    return merged
+end
+
+local PF_HOOKS = {
+    { "Sprayer", { "processSprayerArea", "getSprayerFillLevel", "updateSprayerEffects" } },
+    { "SowingMachine", { "processSowingMachineArea" } },
+    { "Combine", { "processCombineArea" } },
+    { "Mower", { "processMowerArea" } },
+    { "Cultivator", { "processCultivatorArea" } },
+}
+
+local function mapsFromHooks(seenFunctions)
+    local merged = nil
+    for _, hook in ipairs(PF_HOOKS) do
+        local owner = _G[hook[1]]
+        if type(owner) == "table" then
+            for _, methodName in ipairs(hook[2]) do
+                local maps = mapsFromModule(singletonFromFunction(owner[methodName], 0, seenFunctions))
+                if mapsComplete(maps) then
+                    return maps
+                end
+                merged = absorbMaps(merged, maps)
+            end
+        end
+    end
+    return merged
+end
+
+local function objectList(owner, fieldName)
+    if type(owner) ~= "table" then
+        return nil
+    end
+    local system = owner[fieldName]
+    if type(system) == "table" and type(system.vehicles) == "table" then
+        return system.vehicles
+    end
+    if type(system) == "table" and type(system.placeables) == "table" then
+        return system.placeables
+    end
+    if fieldName == "vehicles" and type(owner.vehicles) == "table" then
+        return owner.vehicles
+    end
+    if fieldName == "placeables" and type(owner.placeables) == "table" then
+        return owner.placeables
+    end
+    return nil
+end
+
+-- The singleton stays in the Precision Farming environment. Its specializations are
+-- still registered on the shared vehicle types, and loaded vehicles keep the map objects.
+local function precisionFarmingFromWorld()
+    local seenFunctions = {}
+    local seenClasses = {}
+    local merged = nil
+
+    local function take(maps)
+        if mapsComplete(maps) then
+            return maps
+        end
+        merged = absorbMaps(merged, maps)
+        if mapsComplete(merged) then
+            return merged
+        end
+        return nil
+    end
+
+    local found = take(mapsFromTypeManager(g_vehicleTypeManager, seenFunctions, seenClasses))
+    if found ~= nil then
+        return found
+    end
+    found = take(mapsFromTypeManager(g_placeableTypeManager, seenFunctions, seenClasses))
+    if found ~= nil then
+        return found
+    end
+    found = take(mapsFromHooks(seenFunctions))
+    if found ~= nil then
+        return found
+    end
+
+    local mission = g_currentMission
+    local function scanList(list)
+        if type(list) ~= "table" then
+            return nil
+        end
+        local checked = 0
+        for _, object in pairs(list) do
+            checked = checked + 1
+            if checked > 400 then
+                break
+            end
+            local hit = take(mapsFromVehicleSpecs(object, seenFunctions))
+            if hit ~= nil then
+                return hit
+            end
+        end
+        return nil
+    end
+    found = scanList(objectList(mission, "vehicleSystem"))
+    if found ~= nil then
+        return found
+    end
+    found = scanList(objectList(mission, "placeableSystem"))
+    if found ~= nil then
+        return found
+    end
+    found = scanList(mission ~= nil and mission.vehicles or nil)
+    if found ~= nil then
+        return found
+    end
+    found = scanList(mission ~= nil and mission.placeables or nil)
+    if found ~= nil then
+        return found
+    end
+
+    if g_modManager ~= nil and type(g_modManager.getModByName) == "function" then
+        for _, name in ipairs(PF_MOD_NAMES) do
+            local mod = safeCall(function()
+                return g_modManager:getModByName(name)
+            end, nil)
+            if type(mod) == "table" then
+                local singleton = singletonFromEnv(modEnvironment(mod)) or singletonFromEnv(mod)
+                if singleton == nil then
+                    singleton = singletonFromFunction(mod.load, 0, seenFunctions)
+                    if singleton == nil then
+                        local checked = 0
+                        for _, value in pairs(mod) do
+                            checked = checked + 1
+                            if checked > 40 then
+                                break
+                            end
+                            singleton = singletonFromEnv(value)
+                            if singleton == nil and type(value) == "function" then
+                                singleton = singletonFromFunction(value, 0, seenFunctions)
+                            end
+                            if singleton ~= nil then
+                                break
+                            end
+                        end
+                    end
+                end
+                found = take(mapsFromModule(singleton))
+                if found ~= nil then
+                    return found
+                end
+            end
+        end
+    end
+
+    if type(_G.FS25_precisionFarming) == "table" then
+        found = take(mapsFromModule(singletonFromEnv(_G.FS25_precisionFarming) or _G.FS25_precisionFarming))
+        if found ~= nil then
+            return found
+        end
+        found = take(moduleFromFunctions(_G.FS25_precisionFarming, seenFunctions))
+        if found ~= nil then
+            return found
+        end
+    end
+
+    return merged
+end
+
+local function precisionFarmingInstance()
+    if type(g_precisionFarming) == "table" then
+        return g_precisionFarming
+    end
+    if g_currentMission ~= nil and type(g_currentMission.precisionFarming) == "table" then
+        return g_currentMission.precisionFarming
+    end
+    if g_modManager == nil or type(g_modManager.getModByName) ~= "function" then
+        return nil
+    end
+    for _, name in ipairs(PF_MOD_NAMES) do
+        local mod = safeCall(function()
+            return g_modManager:getModByName(name)
+        end, nil)
+        local env = modEnvironment(mod)
+        local singleton = singletonFromEnv(env) or singletonFromEnv(mod)
+        if singleton ~= nil then
+            return singleton
+        end
+    end
+    return nil
+end
+
+local function precisionFarmingLoaded()
+    if precisionFarmingInstance() ~= nil then
+        return true
+    end
+    if g_modIsLoaded ~= nil then
+        for _, name in ipairs(PF_MOD_NAMES) do
+            if g_modIsLoaded[name] then
+                return true
+            end
+        end
+    end
+    if g_modManager ~= nil and type(g_modManager.getActiveMods) == "function" then
+        local mods = safeCall(function()
+            return g_modManager:getActiveMods()
+        end, nil)
+        if type(mods) == "table" then
+            for _, mod in pairs(mods) do
+                local name = nil
+                if type(mod) == "table" then
+                    name = mod.modName or mod.name
+                elseif type(mod) == "string" then
+                    name = mod
+                end
+                if type(name) == "string" and string.find(string.lower(name), "precisionfarming", 1, true) ~= nil then
+                    return true
+                end
+            end
+        end
+    end
+    return false
+end
+
+local function callWorld(target, method, x, z)
+    if type(target) ~= "table" or type(method) ~= "string" or x == nil or z == nil then
+        return nil
+    end
+    local fn = target[method]
+    if type(fn) ~= "function" then
+        return nil
+    end
+    local ok, first, second = pcall(fn, target, x, z)
+    if not ok then
+        return nil
+    end
+    return first, second
+end
+
+local function asNumber(value)
+    if type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge then
+        return value
+    end
+    if type(value) ~= "table" then
+        return nil
+    end
+    local nested = value.value or value.level or value.amount or value.ph or value.pH or value.nitrogen
+    if type(nested) == "number" and nested == nested and nested ~= math.huge and nested ~= -math.huge then
+        return nested
+    end
+    return nil
+end
+
+local function displayText(value)
+    local named = labelFromValue(value)
+    if named == nil then
+        return nil
+    end
+    if g_i18n ~= nil and type(g_i18n.getText) == "function" and string.find(named, " ", 1, true) == nil then
+        local translated = safeCall(function()
+            local text = g_i18n:getText(named)
+            if type(text) == "string" and text ~= "" and text ~= named then
+                return text
+            end
+            return nil
+        end, nil)
+        if translated ~= nil then
+            return translated
+        end
+    end
+    return named
+end
+
+local function rangePair(first, second)
+    if type(first) == "number" and type(second) == "number" then
+        return first, second
+    end
+    if type(first) == "table" then
+        local minValue = first.min or first.minPh or first.minimum or first[1]
+        local maxValue = first.max or first.maxPh or first.maximum or first[2]
+        if type(minValue) == "number" and type(maxValue) == "number" then
+            return minValue, maxValue
+        end
+    end
+    return nil, nil
+end
+
+local function phStatus(ph, minPh, maxPh)
+    if type(ph) ~= "number" or type(minPh) ~= "number" or type(maxPh) ~= "number" then
+        return nil
+    end
+    if ph < minPh then
+        return "Low"
+    end
+    if ph > maxPh then
+        return "High"
+    end
+    return "Optimal"
+end
+
+local function roundPh(value)
+    local amount = asNumber(value)
+    if amount == nil then
+        return nil
+    end
+    return round2(amount)
+end
+
+local function roundNitrogen(value)
+    local amount = asNumber(value)
+    if amount == nil then
+        return nil
+    end
+    if math.abs(amount) >= 10 then
+        return math.floor(amount + 0.5)
+    end
+    return math.floor(amount * 10 + 0.5) / 10
+end
+
+local function integerState(value, maxState)
+    if type(value) ~= "number" or value < 0 or value > maxState then
+        return nil
+    end
+    local index = math.floor(value + 0.5)
+    if math.abs(value - index) > 0.001 then
+        return nil
+    end
+    return index
+end
+
+-- The state lists are often 1-based, so list[state] is the previous state.
+-- Match the stored state id instead of the array position.
+local function realValueForState(list, state)
+    if type(list) ~= "table" then
+        return nil
+    end
+    for _, entry in pairs(list) do
+        if type(entry) == "table" and entry.value == state and type(entry.realValue) == "number" then
+            return entry.realValue
+        end
+    end
+    return nil
+end
+
+local function callMapNumber(map, names, number)
+    if type(map) ~= "table" then
+        return nil
+    end
+    for _, name in ipairs(names) do
+        local fn = map[name]
+        if type(fn) == "function" then
+            local ok, value = pcall(fn, map, number)
+            if ok then
+                local converted = asNumber(value)
+                if converted ~= nil then
+                    return converted
+                end
+            end
+        end
+    end
+    return nil
+end
+
+-- getLevelAtWorldPos returns a state index. State 5 is 20 kg/ha, not 5.
+local function nitrogenKilograms(map, level)
+    local amount = asNumber(level)
+    if amount == nil then
+        return nil
+    end
+    local maxState = 45
+    if type(map) == "table" and type(map.maxValue) == "number" and map.maxValue > 0 and map.maxValue <= 64 then
+        maxState = map.maxValue
+    end
+    local index = integerState(amount, maxState)
+    if index == nil then
+        return amount
+    end
+    local step = 5
+    if type(map) == "table" and type(map.getNitrogenFromChangedStates) == "function" then
+        local ok, value = pcall(map.getNitrogenFromChangedStates, map, 1)
+        if ok and type(value) == "number" and value > 0 and value <= 20 then
+            step = value
+        end
+    end
+    -- State 0 and 1 are both 0 kg/ha. Each later state adds one step.
+    local expected = 0
+    if index > 1 then
+        expected = (index - 1) * step
+    end
+    if type(map) == "table" then
+        local fromTable = realValueForState(map.nitrogenValues, index)
+            or realValueForState(map.values, index)
+            or realValueForState(map.levelValues, index)
+        if fromTable ~= nil then
+            return fromTable
+        end
+    end
+    local converted = callMapNumber(map, {
+        "getNitrogenValueFromLevel",
+        "getRealValueFromLevel",
+        "getNitrogenAmountFromLevel",
+        "getNitrogenFromLevel",
+        "getRealNitrogenValue",
+    }, index)
+    if converted ~= nil and math.abs(converted - expected) <= step * 0.51 and math.abs(converted - index) > 0.001 then
+        return converted
+    end
+    return expected
+end
+
+-- pH states use the same kind of index. State 0 and 1 are 4.5, then +0.125 each state.
+local function phRealValue(map, level)
+    local amount = asNumber(level)
+    if amount == nil then
+        return nil
+    end
+    local maxState = 31
+    if type(map) == "table" and type(map.maxValue) == "number" and map.maxValue > 0 and map.maxValue <= 40 then
+        maxState = map.maxValue
+    end
+    local index = integerState(amount, maxState)
+    if index == nil then
+        return amount
+    end
+    local step = 0.125
+    local expected = 4.5
+    if index > 1 then
+        expected = 4.5 + (index - 1) * step
+    end
+    if type(map) == "table" then
+        local fromTable = realValueForState(map.pHValues, index)
+            or realValueForState(map.phValues, index)
+            or realValueForState(map.values, index)
+        if fromTable ~= nil then
+            return fromTable
+        end
+    end
+    local converted = callMapNumber(map, {
+        "getPHValueFromLevel",
+        "getPhValueFromLevel",
+        "getRealValueFromLevel",
+        "getPHFromLevel",
+        "getPhFromLevel",
+    }, index)
+    if converted ~= nil and math.abs(converted - expected) <= step * 0.51 and math.abs(converted - index) > 0.001 then
+        return converted
+    end
+    return expected
+end
+
+local function requirementKilograms(map, fruitIndex, soilIndex)
+    if type(map) ~= "table" or type(fruitIndex) ~= "number" or type(soilIndex) ~= "number" then
+        return nil
+    end
+    local lists = {
+        map.fruitRequirements,
+        map.fruitTypeRequirements,
+        map.fruitTypeInfos,
+        map.requirements,
+    }
+    for _, list in ipairs(lists) do
+        if type(list) == "table" then
+            local fruit = list[fruitIndex]
+            if type(fruit) ~= "table" then
+                fruit = list[fruitIndex + 1]
+            end
+            if type(fruit) == "table" then
+                local soil = fruit[soilIndex]
+                if type(soil) ~= "table" and type(fruit.soils) == "table" then
+                    soil = fruit.soils[soilIndex]
+                end
+                if type(soil) == "table" then
+                    local target = soil.targetLevel or soil.target or soil.nTarget
+                    if type(target) == "number" then
+                        return target
+                    end
+                end
+            end
+        end
+    end
+    return callMapNumber(map, {
+        "getFruitRequirement",
+        "getNitrogenRequirement",
+        "getTargetNitrogenForFruitType",
+    }, fruitIndex)
+end
+
+-- Returns nTarget, soilTypeIndex, fruitTypeIndex. A bare first value can be the fruit index.
+local function nitrogenTargetRaw(map, x, z, level, fruitIndex)
+    if type(map) ~= "table" or type(map.getTargetLevelAtWorldPos) ~= "function" then
+        return nil
+    end
+    local defaultIndex = map.nApplyAutoModeFruitRequirementDefaultIndex
+        or map.fruitRequirementDefaultIndex
+        or map.defaultFruitRequirementIndex
+    local ok, first, second, third = pcall(
+        map.getTargetLevelAtWorldPos,
+        map,
+        x,
+        z,
+        nil,
+        fruitIndex,
+        nil,
+        level,
+        defaultIndex
+    )
+    if not ok then
+        ok, first, second, third = pcall(map.getTargetLevelAtWorldPos, map, x, z, nil, nil, nil, level)
+    end
+    if not ok then
+        return nil
+    end
+    local maxState = 45
+    if type(map.maxValue) == "number" and map.maxValue > 0 and map.maxValue <= 64 then
+        maxState = map.maxValue
+    end
+    local function isLevel(value)
+        return integerState(value, maxState) ~= nil
+    end
+    local function isSoil(value)
+        local index = integerState(value, 4)
+        return index ~= nil
+    end
+    if isLevel(first) and first ~= fruitIndex then
+        return first
+    end
+    local returns = { first, second, third }
+    for _, value in ipairs(returns) do
+        if isLevel(value) and value ~= fruitIndex and not isSoil(value) then
+            return value
+        end
+    end
+    for _, value in ipairs(returns) do
+        if type(value) == "number" and value > maxState and value <= 250 and value ~= fruitIndex then
+            return value
+        end
+    end
+    if isLevel(first) then
+        return first
+    end
+    return nil
+end
+
+local function soilTypeName(soilMap, value)
+    if type(value) == "string" and value ~= "" then
+        return value
+    end
+    if type(value) == "table" then
+        local named = displayText(value)
+        if named ~= nil then
+            return named
+        end
+        value = value.index or value.typeIndex or value.soilTypeIndex
+    end
+    if type(value) ~= "number" then
+        return nil
+    end
+    if type(soilMap) == "table" then
+        local lists = { soilMap.soilTypes, soilMap.types, soilMap.typeNames }
+        for _, list in ipairs(lists) do
+            if type(list) == "table" then
+                local entry = list[value] or list[value + 1]
+                local named = displayText(entry)
+                if named ~= nil then
+                    return named
+                end
+            end
+        end
+    end
+    return PF_SOIL_FALLBACK[value]
+end
+
 local function vehicleId(vehicle)
     if vehicle == nil then
         return nil
@@ -542,6 +1717,7 @@ function StateCollector.new()
     self.slowTickAccum = 0
     self.cachedFields = {}
     self.polygonCache = {}
+    self.areaCache = {}
     self.loggedFieldOutlines = false
     self.loggedWeather = false
     self.cachedWeather = {
@@ -1916,6 +3092,171 @@ function StateCollector:collectWeather()
     return weather
 end
 
+function StateCollector:logPrecisionFarming(active, soil, ph, nitrogen)
+    local key = "inactive"
+    if active then
+        if soil and ph and nitrogen then
+            key = "found"
+        elseif soil or ph or nitrogen then
+            key = "partial"
+        else
+            key = "missing"
+        end
+    end
+    if self.pfLogKey == key then
+        return
+    end
+    self.pfLogKey = key
+    if Logging == nil or Logging.info == nil then
+        return
+    end
+    if not active then
+        Logging.info("[MB Livemap] precision farming not active")
+    elseif key == "found" then
+        Logging.info("[MB Livemap] precision farming active, soil/ph/n sampled")
+    elseif key == "partial" then
+        Logging.info(
+            "[MB Livemap] precision farming maps incomplete (soil=%s ph=%s nitrogen=%s)",
+            tostring(soil),
+            tostring(ph),
+            tostring(nitrogen)
+        )
+    else
+        Logging.info("[MB Livemap] precision farming present but soil maps not found")
+    end
+end
+
+function StateCollector:precisionFarmingProbe()
+    if self.pfProbe ~= nil and self.pfProbe.ready then
+        return self.pfProbe
+    end
+    local probe = self.pfProbe or {
+        ready = false,
+        active = false,
+        instance = nil,
+        soilMap = nil,
+        phMap = nil,
+        nitrogenMap = nil,
+        soilMethod = nil,
+        phMethod = nil,
+        nitrogenMethod = nil,
+        phRangeTarget = nil,
+        phRangeMethod = nil,
+        nitrogenTargetTarget = nil,
+        nitrogenTargetMethod = nil,
+    }
+    if not precisionFarmingLoaded() then
+        probe.ready = true
+        probe.active = false
+        self.pfProbe = probe
+        self:logPrecisionFarming(false, false, false, false)
+        return probe
+    end
+    probe.active = true
+    local instance = precisionFarmingInstance()
+    local discovered = nil
+    if instance == nil or (instance.soilMap == nil and instance.nitrogenMap == nil and instance.pHMap == nil and instance.phMap == nil) then
+        discovered = precisionFarmingFromWorld()
+        if discovered ~= nil and instance == nil then
+            instance = discovered.instance
+        end
+    end
+    probe.instance = instance
+    if instance ~= nil then
+        probe.soilMap = namedTable(instance, { "soilMap", "soilTypeMap" })
+        probe.phMap = namedTable(instance, { "phMap", "pHMap", "phValueMap" })
+        probe.nitrogenMap = namedTable(instance, { "nitrogenMap", "nMap", "nitrogenValueMap" })
+    end
+    if discovered ~= nil then
+        if probe.soilMap == nil then
+            probe.soilMap = discovered.soilMap
+        end
+        if probe.phMap == nil then
+            probe.phMap = discovered.phMap
+        end
+        if probe.nitrogenMap == nil then
+            probe.nitrogenMap = discovered.nitrogenMap
+        end
+    end
+    probe.soilMethod = worldReader(probe.soilMap, PF_SOIL_METHODS)
+    probe.phMethod = worldReader(probe.phMap, PF_PH_METHODS)
+    probe.nitrogenMethod = worldReader(probe.nitrogenMap, PF_NITROGEN_METHODS)
+    probe.phRangeTarget, probe.phRangeMethod = bindFunction(probe.phMap, instance, PF_PH_RANGE_METHODS)
+    probe.nitrogenTargetTarget, probe.nitrogenTargetMethod = bindFunction(
+        probe.nitrogenMap,
+        instance,
+        PF_NITROGEN_TARGET_METHODS
+    )
+    local soilOk = probe.soilMethod ~= nil
+    local phOk = probe.phMethod ~= nil
+    local nitrogenOk = probe.nitrogenMethod ~= nil
+    -- Keep looking until soil, pH, and nitrogen can all be read.
+    probe.ready = soilOk and phOk and nitrogenOk
+    self.pfProbe = probe
+    self:logPrecisionFarming(true, soilOk, phOk, nitrogenOk)
+    return probe
+end
+
+function StateCollector:samplePrecisionFarming(x, z, fruitIndex)
+    local probe = self:precisionFarmingProbe()
+    if probe == nil or not probe.active or x == nil or z == nil then
+        return nil
+    end
+    if probe.soilMethod == nil and probe.phMethod == nil and probe.nitrogenMethod == nil then
+        return nil
+    end
+    local soilValue = callWorld(probe.soilMap, probe.soilMethod, x, z)
+    local phValue = callWorld(probe.phMap, probe.phMethod, x, z)
+    local nitrogenValue = callWorld(probe.nitrogenMap, probe.nitrogenMethod, x, z)
+    local rangeA, rangeB = callWorld(probe.phRangeTarget, probe.phRangeMethod, x, z)
+    local minPh, maxPh = rangePair(rangeA, rangeB)
+    local soilIndex = soilValue
+    if type(soilIndex) == "table" then
+        soilIndex = soilIndex.index or soilIndex.typeIndex or soilIndex.soilTypeIndex
+    end
+    if type(soilIndex) == "number" then
+        soilIndex = math.floor(soilIndex + 0.5)
+    else
+        soilIndex = nil
+    end
+    if minPh == nil and type(probe.phMap) == "table" and type(soilIndex) == "number" and soilIndex > 0 then
+        local optimalName = firstFunction(probe.phMap, {
+            "getOptimalPHValueForSoilTypeIndex",
+            "getOptimalPhValueForSoilTypeIndex",
+        })
+        local optimal = nil
+        if optimalName ~= nil then
+            local ok, value = pcall(probe.phMap[optimalName], probe.phMap, soilIndex)
+            if ok then
+                optimal = asNumber(value)
+            end
+        end
+        if optimal ~= nil then
+            minPh = optimal - 0.26
+            maxPh = optimal + 0.26
+        end
+    end
+    local targetValue = requirementKilograms(probe.nitrogenMap, fruitIndex, soilIndex)
+    if targetValue == nil then
+        targetValue = nitrogenTargetRaw(probe.nitrogenMap, x, z, asNumber(nitrogenValue), fruitIndex)
+    end
+    if asNumber(targetValue) == nil then
+        targetValue = callWorld(probe.nitrogenTargetTarget, probe.nitrogenTargetMethod, x, z)
+    end
+    local ph = roundPh(phRealValue(probe.phMap, phValue))
+    local info = {
+        soilType = soilTypeName(probe.soilMap, soilValue),
+        ph = ph,
+        phStatus = phStatus(ph, minPh, maxPh),
+        nitrogen = roundNitrogen(nitrogenKilograms(probe.nitrogenMap, nitrogenValue)),
+        nitrogenTarget = roundNitrogen(nitrogenKilograms(probe.nitrogenMap, targetValue)),
+    }
+    if info.soilType == nil and info.ph == nil and info.nitrogen == nil then
+        return nil
+    end
+    return info
+end
+
 function StateCollector:collectFields()
     local fields = {}
     safeCall(function()
@@ -1929,6 +3270,15 @@ function StateCollector:collectFields()
             return
         end
 
+        if self.areaCache == nil then
+            self.areaCache = {}
+        end
+        local plowingEnabled = missionFlag({ "plowingRequiredEnabled", "plowingRequired" })
+        local limeEnabled = missionFlag({ "limeRequired", "limeRequiredEnabled" })
+        local weedsEnabled = missionFlag({ "weedsEnabled", "weedsRequired" })
+        local stonesEnabled = missionFlag({ "stonesEnabled", "stonesRequired" })
+        local sprayMax = fertilizerApplicationsMax()
+
         for id, field in pairs(fieldList) do
             local fruitType = nil
             local fruitColor = nil
@@ -1937,6 +3287,18 @@ function StateCollector:collectFields()
             local owned = nil
             local fx, fz = nil, nil
             local polygon = nil
+            local areaHa = nil
+            local cropState = nil
+            local needsRolling = nil
+            local needsFertilizer = nil
+            local fertilizerLevel = nil
+            local fertilizerMax = nil
+            local needsSpraying = nil
+            local weeds = nil
+            local needsPlowing = nil
+            local needsLime = nil
+            local needsStones = nil
+            local precision = nil
             local cacheKey = tostring((type(field) == "table" and (field.fieldId or field.rootNode)) or id)
             local displayId = type(field) == "table" and fieldDisplayId(field, id) or tostring(id)
 
@@ -1951,38 +3313,53 @@ function StateCollector:collectFields()
                     fx, fz = field.posX, field.posZ
                 end
 
-                if self.polygonCache[cacheKey] == nil then
-                    local outline = outlineFromField(field)
-                    if outline ~= nil then
-                        self.polygonCache[cacheKey] = outline
+                if self.polygonCache[cacheKey] == nil or self.areaCache[cacheKey] == nil then
+                    local rawOutline = rawOutlineFromField(field)
+                    if self.polygonCache[cacheKey] == nil then
+                        local outline = simplifyPolygon(rawOutline)
+                        if outline ~= nil then
+                            self.polygonCache[cacheKey] = outline
+                        end
+                    end
+                    if self.areaCache[cacheKey] == nil then
+                        local measured = polygonAreaHa(rawOutline)
+                        if measured ~= nil then
+                            self.areaCache[cacheKey] = measured
+                        end
                     end
                 end
                 polygon = self.polygonCache[cacheKey]
 
                 -- getFieldState() is a cache and can still name the fruit from an older pass.
+                -- Care flags still come from a live sample, including fields with no crop.
                 local fruitIndex = nil
+                local sampledState = nil
+                local cachedState = nil
                 if fx ~= nil and fz ~= nil and FieldState ~= nil and FieldState.new ~= nil then
                     local sampled = FieldState.new()
                     local updated = pcall(function()
                         sampled:update(fx, fz)
                     end)
-                    if updated and isKnownFruit(sampled.fruitTypeIndex) then
-                        fruitIndex = sampled.fruitTypeIndex
-                        growthState = sampled.growthState
+                    if updated then
+                        sampledState = sampled
+                        if isKnownFruit(sampled.fruitTypeIndex) then
+                            fruitIndex = sampled.fruitTypeIndex
+                            growthState = sampled.growthState
+                        end
                     end
                 end
                 if not isKnownFruit(fruitIndex) then
-                    local state = field.fieldState
+                    cachedState = field.fieldState
                     if field.getFieldState ~= nil then
                         local live = field:getFieldState()
                         if type(live) == "table" then
-                            state = live
+                            cachedState = live
                         end
                     end
-                    if type(state) == "table" then
-                        fruitIndex = state.fruitTypeIndex or state.fruitIndex
+                    if type(cachedState) == "table" then
+                        fruitIndex = cachedState.fruitTypeIndex or cachedState.fruitIndex
                         if growthState == nil then
-                            growthState = state.growthState
+                            growthState = cachedState.growthState
                         end
                     end
                 end
@@ -2008,6 +3385,40 @@ function StateCollector:collectFields()
                     end
                 end
 
+                local careState = sampledState or cachedState
+                local desc = fruitDescFromIndex(fruitIndex)
+                local groundType = type(careState) == "table" and careState.groundType or nil
+                cropState = cropStateFrom(fruitIndex, growthState, growthMax, groundType)
+                needsRolling = fieldNeedsRolling(careState, fruitIndex, desc)
+                if type(careState) == "table" and type(careState.sprayLevel) == "number" then
+                    fertilizerLevel = careState.sprayLevel
+                    fertilizerMax = sprayMax
+                    needsFertilizer = careState.sprayLevel < sprayMax
+                end
+                local weedNeed = nil
+                if type(careState) == "table" and type(careState.weedState) == "number" then
+                    weeds = weedLabel(careState.weedState)
+                    -- Withered weeds were already sprayed. Living stages still need a pass.
+                    weedNeed = careState.weedState > 0 and careState.weedState < 7
+                end
+                needsSpraying = flagNeed(weedsEnabled, weedNeed)
+                weeds = flagNeed(weedsEnabled, weeds)
+                local plowNeed = nil
+                if type(careState) == "table" and type(careState.plowLevel) == "number" then
+                    plowNeed = careState.plowLevel <= 0
+                end
+                needsPlowing = flagNeed(plowingEnabled, plowNeed)
+                local limeNeed = nil
+                if type(careState) == "table" and type(careState.limeLevel) == "number" then
+                    limeNeed = careState.limeLevel <= 0
+                end
+                needsLime = flagNeed(limeEnabled, limeNeed)
+                local stoneNeed = nil
+                if type(careState) == "table" and type(careState.stoneLevel) == "number" then
+                    stoneNeed = careState.stoneLevel > 0
+                end
+                needsStones = flagNeed(stonesEnabled, stoneNeed)
+
                 local farmland = field.farmland
                 if farmland == nil and field.farmlandId ~= nil and g_farmlandManager ~= nil and g_farmlandManager.getFarmlandById ~= nil then
                     farmland = g_farmlandManager:getFarmlandById(field.farmlandId)
@@ -2015,10 +3426,15 @@ function StateCollector:collectFields()
                 if farmland ~= nil then
                     owned = farmland.farmId ~= nil and farmland.farmId > 0
                 end
+                areaHa = fieldAreaHa(field, farmland, nil)
+                if areaHa == nil then
+                    areaHa = self.areaCache[cacheKey]
+                end
+                precision = self:samplePrecisionFarming(fx, fz, fruitIndex)
 
             end, nil)
 
-            fields[#fields + 1] = {
+            local entry = {
                 id = cacheKey,
                 name = displayId,
                 fruitType = fruitType,
@@ -2029,7 +3445,22 @@ function StateCollector:collectFields()
                 x = fx,
                 z = fz,
                 polygon = polygon,
+                areaHa = areaHa,
+                cropState = cropState,
+                needsRolling = needsRolling,
+                needsFertilizer = needsFertilizer,
+                fertilizerLevel = fertilizerLevel,
+                fertilizerMax = fertilizerMax,
+                needsSpraying = needsSpraying,
+                weeds = weeds,
+                needsPlowing = needsPlowing,
+                needsLime = needsLime,
+                needsStones = needsStones,
             }
+            if precision ~= nil then
+                entry.precisionFarming = precision
+            end
+            fields[#fields + 1] = entry
         end
     end, nil)
 

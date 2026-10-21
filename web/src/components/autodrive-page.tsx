@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Livemap, MapSlot } from "@/components/livemap";
 import { VehicleSheet } from "@/components/vehicle-sheet";
 import { PlayerSheet } from "@/components/player-sheet";
+import { FieldSheet } from "@/components/field-sheet";
 import { CourseplayCard } from "@/components/courseplay-card";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { useLivemapContext } from "@/components/livemap-provider";
@@ -15,6 +16,7 @@ export function AutoDrivePage() {
     useLivemapContext();
   const [selected, setSelected] = useState<Vehicle | null>(null);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
+  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
   const [courseId, setCourseId] = useState("");
   const [lane, setLane] = useState(0);
   const [startAt, setStartAt] = useState<CourseplayStart>("first");
@@ -33,6 +35,8 @@ export function AutoDrivePage() {
     livePlayer?.farmId == null
       ? null
       : (state?.farms?.find((farm) => farm.id === livePlayer.farmId) ?? null);
+  const liveField =
+    selectedFieldId == null ? null : (state?.fields.find((field) => field.id === selectedFieldId) ?? null);
 
   useEffect(() => {
     const vehicle = new URLSearchParams(window.location.search).get("vehicle");
@@ -45,6 +49,7 @@ export function AutoDrivePage() {
     if (!vehicle) return;
     setSelected(vehicle);
     setSelectedPlayerId(null);
+    setSelectedFieldId(null);
     appliedVehicle.current = linkedVehicleId;
   }, [linkedVehicleId, state]);
 
@@ -83,12 +88,14 @@ export function AutoDrivePage() {
         onSelect={(vehicle) => {
           setSelected(vehicle);
           setSelectedPlayerId(null);
+          setSelectedFieldId(null);
         }}
         onSelectPlayer={
           state?.multiplayer === true
             ? (player) => {
                 setSelected(null);
                 setSelectedPlayerId(player.id);
+                setSelectedFieldId(null);
               }
             : undefined
         }
@@ -99,18 +106,27 @@ export function AutoDrivePage() {
           autoDrive={networkReady ? autoDrive : null}
           selectedId={liveSelected?.id}
           selectedPlayerId={livePlayer?.id}
+          selectedFieldId={liveField?.id}
           onSelectVehicle={(vehicle) => {
             setSelected(vehicle);
             setSelectedPlayerId(null);
+            setSelectedFieldId(null);
           }}
           onSelectPlayer={(player) => {
             setSelected(null);
             setSelectedPlayerId(player.id);
+            setSelectedFieldId(null);
+          }}
+          onSelectField={(field) => {
+            setSelected(null);
+            setSelectedPlayerId(null);
+            setSelectedFieldId(field.id);
           }}
         />
       </MapSlot>
       <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1536px]:overflow-auto min-[1536px]:border-t-0 min-[1536px]:border-l">
         <ConnectionBanner connection={connection} bridgeStatus={bridgeStatus} error={error} />
+        <FieldSheet field={liveField} />
         <PlayerSheet player={livePlayer} farm={liveFarm} />
         {networkReady ? (
           <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5">

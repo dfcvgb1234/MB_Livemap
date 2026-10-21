@@ -13,8 +13,10 @@ type Props = {
   state: GameState | null;
   onSelectVehicle: (vehicle: Vehicle) => void;
   onSelectPlayer?: (player: MapPlayer) => void;
+  onSelectField?: (field: Field) => void;
   selectedId?: string | null;
   selectedPlayerId?: string | null;
+  selectedFieldId?: string | null;
   /** When set and available, routes stay drawn. The main livemap omits this. */
   autoDrive?: AutoDriveGraph | null;
 };
@@ -297,21 +299,28 @@ function fieldAnchor(field: Field, frame: MapFrame): { left: number; top: number
 function FieldMarker({
   field,
   frame,
+  selected,
 }: {
   field: Field;
   frame: MapFrame;
+  selected: boolean;
 }) {
   if (field.x == null || field.z == null) return null;
   const pos = worldToPct(field.x, field.z, frame);
+  const number = field.name && field.name.length > 0 ? field.name : fieldNumber(field.id);
   return (
     <div
-      className="pointer-events-none absolute size-4 rounded-sm opacity-70 ml-[-0.5rem] mt-[-0.5rem]"
+      data-field-id={field.id}
+      className={cn(
+        "absolute size-4 cursor-pointer rounded-sm ml-[-0.5rem] mt-[-0.5rem]",
+        selected ? "opacity-100 ring-2 ring-[#f3efe4]" : "opacity-70",
+      )}
       style={{
         left: `${pos.left}%`,
         top: `${pos.top}%`,
         background: fieldFill(field),
       }}
-      title={`Field ${field.id}`}
+      title={`Field ${number}`}
     />
   );
 }
@@ -319,12 +328,15 @@ function FieldMarker({
 function FieldPolygon({
   field,
   frame,
+  selected,
 }: {
   field: Field;
   frame: MapFrame;
+  selected: boolean;
 }) {
   if (!field.polygon || field.polygon.length < 3) return null;
   const color = fieldFill(field);
+  const number = field.name && field.name.length > 0 ? field.name : fieldNumber(field.id);
   const points = field.polygon
     .map((p) => {
       const pos = worldToPct(p.x, p.z, frame);
@@ -333,12 +345,16 @@ function FieldPolygon({
     .join(" ");
   return (
     <polygon
+      data-field-id={field.id}
       points={points}
       fill={color}
-      fillOpacity={0.55}
-      stroke={color}
-      strokeOpacity={0.9}
-      strokeWidth={0.25}
+      fillOpacity={selected ? 0.75 : 0.55}
+      stroke={selected ? "#f3efe4" : color}
+      strokeOpacity={selected ? 1 : 0.9}
+      strokeWidth={selected ? 0.55 : 0.25}
+      className="cursor-pointer"
+      style={{ pointerEvents: "auto" }}
+      aria-label={`Field ${number}`}
     />
   );
 }
@@ -796,7 +812,16 @@ export function MapSlot({
   );
 }
 
-export function Livemap({ state, onSelectVehicle, onSelectPlayer, selectedId, selectedPlayerId, autoDrive }: Props) {
+export function Livemap({
+  state,
+  onSelectVehicle,
+  onSelectPlayer,
+  onSelectField,
+  selectedId,
+  selectedPlayerId,
+  selectedFieldId,
+  autoDrive,
+}: Props) {
   const { settings, mapImageUrl } = useSettings();
   const colorFor = (vehicle: Vehicle) => machineColor(vehicle, settings.colors);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -936,10 +961,16 @@ export function Livemap({ state, onSelectVehicle, onSelectPlayer, selectedId, se
       if (player != null) onSelectPlayer?.(player);
       return;
     }
-    const id = vehicleButton?.getAttribute("data-vehicle-id");
-    if (id == null || id === "") return;
-    const vehicle = vehicles.find((item) => item.id === id);
-    if (vehicle != null) onSelectVehicle(vehicle);
+    const vehicleId = vehicleButton?.getAttribute("data-vehicle-id");
+    if (vehicleId != null && vehicleId !== "") {
+      const vehicle = vehicles.find((item) => item.id === vehicleId);
+      if (vehicle != null) onSelectVehicle(vehicle);
+      return;
+    }
+    const fieldId = target.closest("[data-field-id]")?.getAttribute("data-field-id");
+    if (fieldId == null || fieldId === "") return;
+    const field = fields.find((item) => item.id === fieldId);
+    if (field != null) onSelectField?.(field);
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -1143,16 +1174,15 @@ export function Livemap({ state, onSelectVehicle, onSelectPlayer, selectedId, se
             className="pointer-events-none absolute inset-0 z-0 h-full w-full"
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
-            aria-hidden
           >
             {fields.map((f) => (
-              <FieldPolygon key={f.id} field={f} frame={frame} />
+              <FieldPolygon key={f.id} field={f} frame={frame} selected={selectedFieldId === f.id} />
             ))}
           </svg>
         ) : null}
         {showFields && !hasPolygons
           ? fields.map((f) => (
-              <FieldMarker key={f.id} field={f} frame={frame} />
+              <FieldMarker key={f.id} field={f} frame={frame} selected={selectedFieldId === f.id} />
             ))
           : null}
 
