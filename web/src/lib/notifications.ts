@@ -1,4 +1,4 @@
-import type { NotificationChannel, NotificationSettings } from "./settings";
+import type { NotificationChannel, NotificationSettings, NotificationSoundId } from "./settings";
 import type { Production, Vehicle } from "./types";
 
 export type ToastChannel = NotificationChannel;
@@ -22,6 +22,18 @@ export function channelEnabled(channel: ToastChannel, notifications: Notificatio
 
 export function staysUntilDismissed(channel: ToastChannel, notifications: NotificationSettings) {
   return notifications.manualDismiss[channel] !== false;
+}
+
+/** The clip to play for this alert, or null when sounds are off or this alert is silent. */
+export function resolveNotificationSound(
+  channel: ToastChannel,
+  notifications: NotificationSettings,
+): NotificationSoundId | null {
+  if (!notifications.soundEnabled) return null;
+  const choice = notifications.sounds[channel] ?? "default";
+  if (choice === "none") return null;
+  if (choice === "default") return notifications.defaultSound;
+  return choice;
 }
 
 export function fillChannel(vehicle: Pick<Vehicle, "type" | "category">): "combineFull" | "trailerFull" | null {

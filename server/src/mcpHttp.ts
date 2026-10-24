@@ -65,6 +65,7 @@ async function openSession() {
   };
   const transport = new WebStandardStreamableHTTPServerTransport({
     sessionIdGenerator: () => randomUUID(),
+    enableJsonResponse: true,
     onsessioninitialized: (id) => {
       sessionId = id;
       sessions.set(id, { transport, lastUsed: Date.now(), close });
@@ -78,21 +79,39 @@ async function openSession() {
   return transport;
 }
 
+/** The protocol handler answers JSON only when the client names both types. */
+function withMcpAccept(request: Request) {
+  const accept = request.headers.get("accept") ?? "";
+  if (accept.includes("application/json") && accept.includes("text/event-stream")) return request;
+  const headers = new Headers(request.headers);
+  headers.set("accept", "application/json, text/event-stream");
+  return new Request(request, { headers });
+}
+
+function methodNotAllowed() {
+  return new Response(
+    JSON.stringify({ jsonrpc: "2.0", error: { code: -32000, message: "Method not allowed." }, id: null }),
+    {
+      status: 405,
+      headers: { "content-type": "application/json", allow: "GET, POST, DELETE" },
+    },
+  );
+}
+
 /** Streamable HTTP MCP. One session per client, only meant for loopback callers. */
 export async function handleMcpHttp(request: Request): Promise<Response> {
   if (!originAllowed(request.headers.get("origin"))) {
     return rpcError(403, -32000, "MCP is only accepted from this computer");
   }
-  const requested = request.headers.get("mcp-session-id");
+  const call = withMcpAccept(request);
+  const requested = call.headers.get("mcp-session-id");
   if (requested) {
     const existing = sessions.get(requested);
     if (!existing) return rpcError(404, -32001, "Session not found");
     existing.lastUsed = Date.now();
-    return existing.transport.handleRequest(request);
+    return existing.transport.handleRequest(call);
   }
-  if (request.method !== "POST") {
-    return rpcError(400, -32000, "Bad Request: Mcp-Session-Id header is required");
-  }
+  if (call.method !== "POST") return methodNotAllowed();
   const transport = await openSession();
-  return transport.handleRequest(request);
+  return transport.handleRequest(call);
 }

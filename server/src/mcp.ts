@@ -735,11 +735,13 @@ async function refreshTools() {
 
 const entry = process.argv[1]?.replace(/\\/g, "/") ?? "";
 if (entry.endsWith("/src/mcp.ts") || entry.endsWith("/src/mcp.js")) {
-  const mcp = createLivemapMcp();
-  await mcp.refreshTools();
-  const timer = setInterval(() => {
-    void mcp.refreshTools();
-  }, 2000);
-  timer.unref();
-  await mcp.server.connect(new StdioServerTransport());
+  void (async () => {
+    const mcp = createLivemapMcp();
+    await mcp.refreshTools();
+    const timer = setInterval(() => {
+      void mcp.refreshTools();
+    }, 2000);
+    timer.unref();
+    await mcp.server.connect(new StdioServerTransport());
+  })();
 }

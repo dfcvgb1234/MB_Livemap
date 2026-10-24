@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { COLOR_LABELS, MACHINE_COLOR_KEYS } from "@/lib/machine-colors";
-import { NOTIFICATION_CHANNELS, type MapImageFit } from "@/lib/settings";
+import { previewNotificationSound, SOUND_LABELS } from "@/lib/notification-sounds";
+import { NOTIFICATION_CHANNELS, NOTIFICATION_SOUNDS, type MapImageFit, type NotificationSoundChoice, type NotificationSoundId } from "@/lib/settings";
 import { MAX_CUSTOM_PROFILES, formatInterval, type UpdateGroup } from "@/lib/performance";
 import { cn } from "@/lib/utils";
 import { useSettings } from "@/components/settings-provider";
@@ -34,21 +35,27 @@ function NotificationRow({
   onEnabled,
   stays,
   onStays,
+  sound,
+  soundDisabled,
+  onSound,
 }: {
   label: string;
   enabled: boolean;
   onEnabled: (next: boolean) => void;
   stays: boolean;
   onStays: (next: boolean) => void;
+  sound: NotificationSoundChoice;
+  soundDisabled: boolean;
+  onSound: (next: NotificationSoundChoice) => void;
 }) {
   return (
-    <div className="flex min-h-11 items-center gap-2 rounded-lg pr-2 hover:bg-white/5">
+    <div className="flex min-h-11 flex-wrap items-center gap-2 rounded-lg pr-2 hover:bg-white/5">
       <button
         type="button"
         role="switch"
         aria-checked={enabled}
         onClick={() => onEnabled(!enabled)}
-        className="flex min-h-11 min-w-0 flex-1 items-center justify-between gap-3 px-2 text-left text-sm"
+        className="flex min-h-11 min-w-40 flex-1 items-center justify-between gap-3 px-2 text-left text-sm"
       >
         <span className="truncate">{label}</span>
         <span
@@ -78,6 +85,21 @@ function NotificationRow({
       >
         {stays ? "Stays" : "Auto"}
       </button>
+      <select
+        aria-label={`${label} sound`}
+        disabled={soundDisabled}
+        value={sound}
+        onChange={(event) => onSound(event.target.value as NotificationSoundChoice)}
+        className="min-h-8 shrink-0 rounded-lg border border-white/10 bg-black/25 px-2 text-xs disabled:opacity-40"
+      >
+        <option value="default">Default</option>
+        <option value="none">None</option>
+        {NOTIFICATION_SOUNDS.map((id) => (
+          <option key={id} value={id}>
+            {SOUND_LABELS[id]}
+          </option>
+        ))}
+      </select>
     </div>
   );
 }
@@ -353,18 +375,79 @@ export function SettingsDialog() {
 
             {category === "notifications" ? (
               <section className="flex flex-col gap-1">
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={settings.notifications.soundEnabled}
+                  onClick={() => setNotifications({ soundEnabled: !settings.notifications.soundEnabled })}
+                  className="flex min-h-11 items-center justify-between gap-3 rounded-lg px-2 text-left text-sm hover:bg-white/5"
+                >
+                  <span>Play sound</span>
+                  <span
+                    className={cn(
+                      "relative h-6 w-11 shrink-0 rounded-full transition-colors",
+                      settings.notifications.soundEnabled ? "bg-[#e2b657]" : "bg-white/15",
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        "absolute top-0.5 size-5 rounded-full bg-[#2a2112] transition-transform",
+                        settings.notifications.soundEnabled ? "left-5" : "left-0.5",
+                      )}
+                    />
+                  </span>
+                </button>
+                <div className="mb-2 flex flex-wrap items-center gap-2 px-2">
+                  <label className="flex min-h-10 min-w-40 flex-1 items-center justify-between gap-3 text-sm">
+                    <span>Default sound</span>
+                    <select
+                      aria-label="Default notification sound"
+                      disabled={!settings.notifications.soundEnabled}
+                      value={settings.notifications.defaultSound}
+                      onChange={(event) => {
+                        const next = event.target.value as NotificationSoundId;
+                        setNotifications({ defaultSound: next });
+                        previewNotificationSound(next);
+                      }}
+                      className="min-h-10 rounded-lg border border-white/10 bg-black/25 px-2 disabled:opacity-40"
+                    >
+                      {NOTIFICATION_SOUNDS.map((id) => (
+                        <option key={id} value={id}>
+                          {SOUND_LABELS[id]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    type="button"
+                    disabled={!settings.notifications.soundEnabled}
+                    onClick={() => previewNotificationSound(settings.notifications.defaultSound)}
+                    className="min-h-10 rounded-lg bg-white/10 px-3 text-sm font-semibold enabled:hover:bg-white/15 disabled:opacity-40"
+                  >
+                    Preview
+                  </button>
+                </div>
                 {NOTIFICATION_CHANNELS.map((channel) => (
                   <NotificationRow
                     key={channel}
                     label={NOTIFICATION_LABELS[channel]}
                     enabled={settings.notifications[channel]}
                     stays={settings.notifications.manualDismiss[channel]}
+                    sound={settings.notifications.sounds[channel]}
+                    soundDisabled={!settings.notifications.soundEnabled || !settings.notifications[channel]}
                     onEnabled={(next) => setNotifications({ [channel]: next })}
                     onStays={(next) =>
                       setNotifications({
                         manualDismiss: { ...settings.notifications.manualDismiss, [channel]: next },
                       })
                     }
+                    onSound={(next) => {
+                      setNotifications({
+                        sounds: { ...settings.notifications.sounds, [channel]: next },
+                      });
+                      if (!settings.notifications.soundEnabled || next === "none") return;
+                      previewNotificationSound(next === "default" ? settings.notifications.defaultSound : next);
+                    }}
                   />
                 ))}
                 <label className="mt-2 flex flex-col gap-2 px-2 text-sm">
@@ -382,7 +465,8 @@ export function SettingsDialog() {
                 </label>
                 <p className="px-2 text-xs text-[#b7b1a4]">
                   Stays keeps an alert until you close it. Auto closes it after 8 seconds. Both are saved in the history.
-                  Other AutoDrive messages show with problems. Fuel and DEF are ignored.
+                  Play sound uses the default unless an alert picks its own. None keeps that alert quiet. Other AutoDrive
+                  messages show with problems. Fuel and DEF are ignored.
                 </p>
               </section>
             ) : null}

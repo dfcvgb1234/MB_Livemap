@@ -21,6 +21,7 @@ const TYPES: Record<string, string> = {
   ".map": "application/json; charset=utf-8",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+  ".wav": "audio/wav",
 };
 
 /** Skip virtual and VPN adapters so the tablet QR uses the home Wi-Fi address. */
@@ -181,6 +182,33 @@ function sendFile(req: IncomingMessage, res: ServerResponse, file: string) {
   createReadStream(file).pipe(res);
 }
 
+/** The dashboard page and the JSON route share this name. The page is the form with a slash. */
+const PAGE_AND_API = new Set(["autodrive"]);
+
+function splitUrl(url: string) {
+  const split = url.indexOf("?");
+  return {
+    path: split === -1 ? url : url.slice(0, split),
+    query: split === -1 ? "" : url.slice(split),
+  };
+}
+
+function wantsHtmlPage(accept: string | string[] | undefined) {
+  const header = Array.isArray(accept) ? accept.join(",") : (accept ?? "");
+  const first = header.split(",")[0]?.split(";")[0]?.trim().toLowerCase();
+  return first === "text/html" || first === "application/xhtml+xml";
+}
+
+/** Keep /mcp on the protocol handler. A trailing slash must not miss the route or hit a page. */
+function rewriteMcpUrl(url: string): string | null {
+  const split = url.indexOf("?");
+  const path = split === -1 ? url : url.slice(0, split);
+  const query = split === -1 ? "" : url.slice(split);
+  const bare = path.replace(/\/+$/, "") || "/";
+  if (bare !== "/mcp" && !bare.startsWith("/mcp/")) return null;
+  return `${bare}${query}`;
+}
+
 export function startDesktopHost(options: {
   port: number;
   staticRoot: string;
@@ -189,7 +217,17 @@ export function startDesktopHost(options: {
 }) {
   const listener = getRequestListener(options.fetch);
   const server = createServer((req, res) => {
-    if (req.method === "GET" || req.method === "HEAD") {
+    const mcpUrl = rewriteMcpUrl(req.url ?? "/");
+    if (mcpUrl) req.url = mcpUrl;
+    const { path: requestPath, query } = splitUrl(req.url ?? "/");
+    const apiName = (requestPath.replace(/\/+$/, "") || "/").replace(/^\/+/, "");
+    const sharedPage = PAGE_AND_API.has(apiName) && !requestPath.endsWith("/");
+    if (sharedPage && (req.method === "GET" || req.method === "HEAD") && wantsHtmlPage(req.headers.accept)) {
+      res.writeHead(308, { Location: `/${apiName}/${query}` });
+      res.end();
+      return;
+    }
+    if (!mcpUrl && !sharedPage && (req.method === "GET" || req.method === "HEAD")) {
       const file = resolveStatic(options.staticRoot, req.url ?? "/");
       if (file) {
         sendFile(req, res, file);

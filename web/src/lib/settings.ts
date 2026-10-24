@@ -24,6 +24,13 @@ export const NOTIFICATION_CHANNELS: NotificationChannel[] = [
   "productionFull",
 ];
 
+export const NOTIFICATION_SOUNDS = ["chime", "bell", "ping", "alert", "soft"] as const;
+
+export type NotificationSoundId = (typeof NOTIFICATION_SOUNDS)[number];
+
+/** "default" follows the shared sound. "none" stays silent for that alert. */
+export type NotificationSoundChoice = "default" | "none" | NotificationSoundId;
+
 export type NotificationSettings = {
   combineFull: boolean;
   trailerFull: boolean;
@@ -36,6 +43,10 @@ export type NotificationSettings = {
   /** When true, that alert stays on screen until it is closed. */
   manualDismiss: Record<NotificationChannel, boolean>;
   fillThreshold: number;
+  /** Master switch. Off keeps every alert silent. */
+  soundEnabled: boolean;
+  defaultSound: NotificationSoundId;
+  sounds: Record<NotificationChannel, NotificationSoundChoice>;
 };
 
 export type AppSettings = {
@@ -57,6 +68,17 @@ export const DEFAULT_MANUAL_DISMISS: Record<NotificationChannel, boolean> = {
   productionFull: true,
 };
 
+export const DEFAULT_CHANNEL_SOUNDS: Record<NotificationChannel, NotificationSoundChoice> = {
+  combineFull: "default",
+  trailerFull: "default",
+  adArrived: "default",
+  adStuck: "default",
+  adProblem: "default",
+  cpFinished: "default",
+  productionMissing: "default",
+  productionFull: "default",
+};
+
 export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   combineFull: true,
   trailerFull: true,
@@ -68,13 +90,20 @@ export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   productionFull: true,
   manualDismiss: { ...DEFAULT_MANUAL_DISMISS },
   fillThreshold: 90,
+  soundEnabled: false,
+  defaultSound: "chime",
+  sounds: { ...DEFAULT_CHANNEL_SOUNDS },
 };
 
 export const DEFAULT_SETTINGS: AppSettings = {
   version: 1,
   mapImageFit: "pda",
   colors: { ...DEFAULT_COLORS },
-  notifications: { ...DEFAULT_NOTIFICATIONS, manualDismiss: { ...DEFAULT_MANUAL_DISMISS } },
+  notifications: {
+    ...DEFAULT_NOTIFICATIONS,
+    manualDismiss: { ...DEFAULT_MANUAL_DISMISS },
+    sounds: { ...DEFAULT_CHANNEL_SOUNDS },
+  },
   performance: { activeId: DEFAULT_PERFORMANCE.activeId, custom: [] },
 };
 
@@ -98,10 +127,20 @@ function sanitizeColors(value: unknown): MachineColors {
   return colors;
 }
 
+function isSoundId(value: unknown): value is NotificationSoundId {
+  return typeof value === "string" && (NOTIFICATION_SOUNDS as readonly string[]).includes(value);
+}
+
+function sanitizeSoundChoice(value: unknown): NotificationSoundChoice {
+  if (value === "default" || value === "none" || isSoundId(value)) return value;
+  return "default";
+}
+
 function sanitizeNotifications(value: unknown): NotificationSettings {
   const notifications: NotificationSettings = {
     ...DEFAULT_NOTIFICATIONS,
     manualDismiss: { ...DEFAULT_MANUAL_DISMISS },
+    sounds: { ...DEFAULT_CHANNEL_SOUNDS },
   };
   if (!value || typeof value !== "object") return notifications;
   const record = value as Record<string, unknown>;
@@ -116,6 +155,15 @@ function sanitizeNotifications(value: unknown): NotificationSettings {
     }
   }
   notifications.fillThreshold = clampThreshold(record.fillThreshold);
+  if (typeof record.soundEnabled === "boolean") notifications.soundEnabled = record.soundEnabled;
+  if (isSoundId(record.defaultSound)) notifications.defaultSound = record.defaultSound;
+  const sounds = record.sounds;
+  if (sounds && typeof sounds === "object") {
+    const saved = sounds as Record<string, unknown>;
+    for (const key of NOTIFICATION_CHANNELS) {
+      if (key in saved) notifications.sounds[key] = sanitizeSoundChoice(saved[key]);
+    }
+  }
   return notifications;
 }
 

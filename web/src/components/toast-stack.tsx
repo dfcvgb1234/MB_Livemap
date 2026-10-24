@@ -12,7 +12,8 @@ import {
   saveHistory,
   type HistoryEntry,
 } from "@/lib/notification-history";
-import { channelEnabled, staysUntilDismissed, type ToastItem } from "@/lib/notifications";
+import { armNotificationAudio, playNotificationSound } from "@/lib/notification-sounds";
+import { channelEnabled, resolveNotificationSound, staysUntilDismissed, type ToastItem } from "@/lib/notifications";
 import type { LivemapNotification } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -57,6 +58,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   settingsRef.current = settings;
   readyRef.current = ready;
   toastsRef.current = toasts;
+
+  useEffect(() => {
+    armNotificationAudio();
+  }, []);
 
   useEffect(() => {
     const stored = loadHistory();
@@ -114,6 +119,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       if (now - last < 4000) return;
       recent.current.set(key, now);
       remember(toast);
+      playNotificationSound(resolveNotificationSound(toast.channel, settingsRef.current.notifications));
       setToasts((current) => [...current.filter((item) => item.id !== toast.id), toast]);
       if (!staysUntilDismissed(toast.channel, settingsRef.current.notifications)) {
         scheduleDismiss(toast.id);

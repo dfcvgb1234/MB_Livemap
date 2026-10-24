@@ -90,6 +90,13 @@ const NOTIFICATION_CHANNELS = [
 
 type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
+/** Keep in step with web/src/lib/settings.ts. */
+const NOTIFICATION_SOUNDS = ["chime", "bell", "ping", "alert", "soft"] as const;
+
+type NotificationSoundId = (typeof NOTIFICATION_SOUNDS)[number];
+
+type NotificationSoundChoice = "default" | "none" | NotificationSoundId;
+
 type NotificationSettings = {
   combineFull: boolean;
   trailerFull: boolean;
@@ -101,6 +108,9 @@ type NotificationSettings = {
   productionFull: boolean;
   manualDismiss: Record<NotificationChannel, boolean>;
   fillThreshold: number;
+  soundEnabled: boolean;
+  defaultSound: NotificationSoundId;
+  sounds: Record<NotificationChannel, NotificationSoundChoice>;
 };
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -191,6 +201,19 @@ function defaultManualDismiss(): Record<NotificationChannel, boolean> {
   };
 }
 
+function defaultChannelSounds(): Record<NotificationChannel, NotificationSoundChoice> {
+  return {
+    combineFull: "default",
+    trailerFull: "default",
+    adArrived: "default",
+    adStuck: "default",
+    adProblem: "default",
+    cpFinished: "default",
+    productionMissing: "default",
+    productionFull: "default",
+  };
+}
+
 export function defaultSettings(): StoredSettings {
   return {
     version: 1,
@@ -207,6 +230,9 @@ export function defaultSettings(): StoredSettings {
       productionFull: true,
       manualDismiss: defaultManualDismiss(),
       fillThreshold: 90,
+      soundEnabled: false,
+      defaultSound: "chime",
+      sounds: defaultChannelSounds(),
     },
     performance: { activeId: "normal", custom: [] },
   };
@@ -243,6 +269,15 @@ function clampThreshold(value: unknown) {
   return Math.min(100, Math.max(50, Math.round(n)));
 }
 
+function isSoundId(value: unknown): value is NotificationSoundId {
+  return typeof value === "string" && (NOTIFICATION_SOUNDS as readonly string[]).includes(value);
+}
+
+function sanitizeSoundChoice(value: unknown): NotificationSoundChoice {
+  if (value === "default" || value === "none" || isSoundId(value)) return value;
+  return "default";
+}
+
 function sanitizeNotifications(value: unknown): NotificationSettings {
   const notifications: NotificationSettings = {
     combineFull: true,
@@ -255,6 +290,9 @@ function sanitizeNotifications(value: unknown): NotificationSettings {
     productionFull: true,
     manualDismiss: defaultManualDismiss(),
     fillThreshold: 90,
+    soundEnabled: false,
+    defaultSound: "chime",
+    sounds: defaultChannelSounds(),
   };
   if (!value || typeof value !== "object") return notifications;
   const record = value as Record<string, unknown>;
@@ -269,6 +307,15 @@ function sanitizeNotifications(value: unknown): NotificationSettings {
     }
   }
   notifications.fillThreshold = clampThreshold(record.fillThreshold);
+  if (typeof record.soundEnabled === "boolean") notifications.soundEnabled = record.soundEnabled;
+  if (isSoundId(record.defaultSound)) notifications.defaultSound = record.defaultSound;
+  const sounds = record.sounds;
+  if (sounds && typeof sounds === "object") {
+    const saved = sounds as Record<string, unknown>;
+    for (const key of NOTIFICATION_CHANNELS) {
+      if (key in saved) notifications.sounds[key] = sanitizeSoundChoice(saved[key]);
+    }
+  }
   return notifications;
 }
 

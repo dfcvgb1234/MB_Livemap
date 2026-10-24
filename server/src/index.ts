@@ -1031,12 +1031,14 @@ app.get("/courseplay", (c) =>
   }),
 );
 
-app.all("/mcp", async (c) => {
+const mcpRoute = async (c: Parameters<typeof isLoopback>[0]) => {
   if (!isLoopback(c)) {
     return c.json({ error: "MCP is only accepted from this computer" }, 403);
   }
   return handleMcpHttp(c.req.raw);
-});
+};
+app.all("/mcp", mcpRoute);
+app.all("/mcp/", mcpRoute);
 
 app.post("/api/command", async (c) => {
   if (!isLoopback(c)) {

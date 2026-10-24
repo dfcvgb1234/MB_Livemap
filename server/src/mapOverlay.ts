@@ -12,13 +12,10 @@ import {
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
-import { createRequire } from "node:module";
+import { decode as decodeJpeg } from "jpeg-js";
 import { decodeDds, encodePng } from "./dds.js";
 import { withZip, type ZipEntryInfo } from "./zipList.js";
 import type { GameState } from "./types.js";
-
-const require = createRequire(import.meta.url);
-const jpeg = require("jpeg-js") as typeof import("jpeg-js");
 
 const execFileAsync = promisify(execFile);
 
@@ -596,7 +593,7 @@ function imageFromUpload(bytes: Uint8Array): { bytes: Uint8Array; mime: string }
   }
   if (isPng(bytes)) return { bytes, mime: "image/png" };
   if (isJpeg(bytes)) {
-    const decoded = jpeg.decode(bytes, { formatAsRGBA: true, maxResolutionInMP: 70 });
+    const decoded = decodeJpeg(bytes, { formatAsRGBA: true, maxResolutionInMP: 70 });
     return { bytes: encodePng(decoded.width, decoded.height, decoded.data), mime: "image/png" };
   }
   if (isWebp(bytes)) return { bytes, mime: "image/webp" };

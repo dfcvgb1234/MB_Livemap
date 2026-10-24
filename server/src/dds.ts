@@ -1,7 +1,4 @@
-import { createRequire } from "node:module";
-
-const require = createRequire(import.meta.url);
-const { PNG } = require("pngjs") as typeof import("pngjs");
+import { PNG } from "pngjs";
 
 const DDS_MAGIC = 0x20534444;
 const MAX_EDGE = 8192;
