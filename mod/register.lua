@@ -7,8 +7,10 @@ local modName = g_currentModName or "FS25_MB_Livemap"
 source(modDirectory .. "src/Json.lua")
 source(modDirectory .. "src/TcpClient.lua")
 source(modDirectory .. "src/StateCollector.lua")
+source(modDirectory .. "src/FieldBoundaryScanner.lua")
 source(modDirectory .. "src/AutoDriveNotify.lua")
 source(modDirectory .. "src/AutoDriveSync.lua")
+source(modDirectory .. "src/CourseplaySync.lua")
 source(modDirectory .. "src/CommandHandler.lua")
 source(modDirectory .. "src/LivemapBridge.lua")
 

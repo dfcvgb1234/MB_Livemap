@@ -1,6 +1,14 @@
 "use client";
 
 import { useLivemapContext } from "@/components/livemap-provider";
+import {
+  HideDisabledLinesButton,
+  disabledProductionCount,
+  isDisabledProductionLine,
+  productionLineLabel,
+  productionLineTone,
+  useHiddenProductionLines,
+} from "@/components/production-lines";
 import { Badge } from "@/components/ui/badge";
 import {
   Card,
@@ -37,8 +45,16 @@ function FillBar({ fill }: { fill: ProductionFill }) {
   );
 }
 
+const LINE_TONE = {
+  ok: "text-lime-700",
+  warn: "text-amber-700",
+  full: "text-orange-700",
+  muted: "text-stone-500",
+} as const;
+
 export default function ProductionsPage() {
   const { state, connection } = useLivemapContext();
+  const hiddenLines = useHiddenProductionLines();
   const productions = (state?.productions ?? []).filter((point) => point.status !== "unowned");
 
   if ((connection === "connecting" || connection === "reconnecting") && !state) {
@@ -83,29 +99,48 @@ export default function ProductionsPage() {
         </p>
       </div>
       <div className="grid gap-4 md:grid-cols-2">
-        {productions.map((p) => (
+        {productions.map((p) => {
+          const lines = p.lines ?? [];
+          const disabledCount = disabledProductionCount(lines);
+          const hideDisabled = hiddenLines.hides(p.id);
+          const shown = hideDisabled ? lines.filter((line) => !isDisabledProductionLine(line)) : lines;
+          return (
           <Card key={p.id} className="border-stone-200 bg-white shadow-sm">
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between gap-2">
                 <CardTitle className="text-lg text-stone-900">{p.name}</CardTitle>
-                <Badge
-                  variant={p.status === "active" ? "default" : "secondary"}
-                  className="capitalize"
-                >
-                  {p.status ?? "unknown"}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  {disabledCount > 0 ? (
+                    <HideDisabledLinesButton
+                      pressed={hideDisabled}
+                      tone="light"
+                      onToggle={() => hiddenLines.toggle(p.id)}
+                    />
+                  ) : null}
+                  <Badge
+                    variant={p.status === "active" ? "default" : "secondary"}
+                    className="capitalize"
+                  >
+                    {p.status ?? "unknown"}
+                  </Badge>
+                </div>
               </div>
               <CardDescription>ID {p.id}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              {(p.lines ?? []).length > 0 ? (
+              {lines.length > 0 ? (
                 <div className="space-y-1">
-                  {(p.lines ?? []).map((line, index) => (
-                    <div key={`${line.name}-${index}`} className="flex justify-between text-sm">
+                  {shown.map((line, index) => (
+                    <div key={`${line.name}-${index}`} className="flex justify-between gap-3 text-sm">
                       <span className="text-stone-800">{line.name}</span>
-                      <span className="text-stone-600">{line.status ?? "Unknown"}</span>
+                      <span className={LINE_TONE[productionLineTone(line)]}>{productionLineLabel(line)}</span>
                     </div>
                   ))}
+                  {hideDisabled && disabledCount > 0 ? (
+                    <p className="text-xs text-stone-500">
+                      {disabledCount} disabled {disabledCount === 1 ? "line" : "lines"} hidden
+                    </p>
+                  ) : null}
                 </div>
               ) : null}
               <div>
@@ -134,7 +169,8 @@ export default function ProductionsPage() {
               </div>
             </CardContent>
           </Card>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

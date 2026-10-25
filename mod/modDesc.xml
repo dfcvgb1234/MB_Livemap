@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8" standalone="no" ?>
 <modDesc descVersion="92">
     <author>MB Livemap</author>
-    <version>0.1.4.8</version>
+    <version>0.1.5.0</version>
     <title>
         <en>MB Livemap Bridge</en>
     </title>
@@ -13,7 +13,7 @@
         </en>
     </description>
     <iconFilename>icon.png</iconFilename>
-    <multiplayer supported="false"/>
+    <multiplayer supported="true"/>
     <extraSourceFiles>
         <sourceFile filename="register.lua"/>
     </extraSourceFiles>

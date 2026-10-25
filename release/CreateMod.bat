@@ -2,7 +2,7 @@
 setlocal
 
 rem Compress-Archive writes src\File.lua. FS25 only loads src/File.lua.
-set "FOLDER=%~dp0mod"
+set "FOLDER=%~dp0..\mod"
 set "ZIP=%~dp0FS25_MB_Livemap.zip"
 
 where tar >nul 2>&1

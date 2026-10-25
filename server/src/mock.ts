@@ -1,4 +1,4 @@
-import type { AutoDriveGraph, GameState, LivemapNotification } from "./types.js";
+import type { AutoDriveGraph, CourseplayCourses, GameState, LivemapNotification, Vehicle } from "./types.js";
 
 const FRUITS = [
   "wheat",
@@ -57,6 +57,27 @@ const MOCK_NOTIFICATIONS: Array<Omit<LivemapNotification, "id" | "ts">> = [
   },
 ];
 
+const MOCK_MP =
+  process.env.MB_LIVEMAP_MOCK_MP === "1" || process.env.MB_LIVEMAP_MOCK_MP === "true";
+
+function multiplayerMock() {
+  return MOCK_MP || mockMpRuntime;
+}
+
+/** Farm ids the dashboard last enabled. Null keeps the host farm only. */
+let mockEnabledFarmIds: number[] | null = null;
+/** Turned on by `POST /mock/start?mp=1` so a running dev server can show the hosted UI. */
+let mockMpRuntime = false;
+
+export function setMockMultiplayer(enabled: boolean) {
+  mockMpRuntime = enabled;
+  if (!enabled) mockEnabledFarmIds = null;
+}
+
+export function setMockFarmFilter(farmIds: number[]) {
+  mockEnabledFarmIds = farmIds.filter((id) => Number.isInteger(id) && id > 0);
+}
+
 /** Deterministic-ish mock farm state that gently animates for demos. */
 export function createMockState(t = Date.now()): GameState {
   // Slow phase so map markers stay easy to tap during demos.
@@ -85,6 +106,8 @@ export function createMockState(t = Date.now()): GameState {
       damage: 0.04,
       adCapable: true,
       adActive: false,
+      cpCapable: true,
+      cpActive: false,
       adFillTypes: [
         { id: "1", name: "Wheat" },
         { id: "2", name: "Barley" },
@@ -111,6 +134,8 @@ export function createMockState(t = Date.now()): GameState {
       adActive: true,
       adDestination: "Silo",
       adMode: "drive" as const,
+      cpCapable: true,
+      cpActive: false,
     },
     {
       id: "v-truck-1",
@@ -127,6 +152,8 @@ export function createMockState(t = Date.now()): GameState {
       damage: 0,
       adCapable: true,
       adActive: false,
+      cpCapable: true,
+      cpActive: false,
       adFillTypes: [
         { id: "1", name: "Wheat" },
         { id: "3", name: "Corn" },
@@ -160,7 +187,135 @@ export function createMockState(t = Date.now()): GameState {
       fills: [{ name: "Wheat", fillLevel: Math.round(24000 * cargoRatio(t, 4000)), capacity: 24000 }],
       damage: 0.08,
     },
+    {
+      id: "v-seeder-low",
+      name: "Amazone Condor",
+      type: "sowingMachine",
+      category: "implement" as const,
+      x: -40,
+      z: 220,
+      heading: 0.2,
+      speed: 0,
+      engineOn: false,
+      attached: [],
+      fills: [
+        { name: "Seeds", fillType: "SEEDS", fillLevel: 80, capacity: 2000 },
+        { name: "Fertilizer", fillType: "FERTILIZER", fillLevel: 60, capacity: 1200 },
+      ],
+      damage: 0.01,
+    },
+    {
+      id: "v-sprayer-1",
+      name: "Hardi Mega",
+      type: "sprayer",
+      category: "implement" as const,
+      x: 120,
+      z: 260,
+      heading: 1.2,
+      speed: 0,
+      engineOn: false,
+      attached: [],
+      fills: [{ name: "Herbicide", fillType: "HERBICIDE", fillLevel: 30, capacity: 600 }],
+      damage: 0,
+    },
+    {
+      id: "v-fert-1",
+      name: "Bredal K105",
+      type: "fertilizerSpreader",
+      category: "implement" as const,
+      x: 180,
+      z: 300,
+      heading: 0.4,
+      speed: 0,
+      engineOn: false,
+      attached: [],
+      fills: [{ name: "Fertilizer", fillType: "FERTILIZER", fillLevel: 90, capacity: 3200 }],
+      damage: 0.03,
+    },
+    {
+      id: "v-slurry-1",
+      name: "Zunhammer",
+      type: "manureBarrel",
+      category: "trailer" as const,
+      x: -220,
+      z: 80,
+      heading: -0.6,
+      speed: 0,
+      engineOn: false,
+      attached: [],
+      fills: [{ name: "Liquid Manure", fillType: "LIQUIDMANURE", fillLevel: 400, capacity: 16000 }],
+      damage: 0.05,
+    },
+    {
+      id: "v-manure-1",
+      name: "Bergmann",
+      type: "manureSpreader",
+      category: "implement" as const,
+      x: -260,
+      z: 140,
+      heading: 0.8,
+      speed: 0,
+      engineOn: false,
+      attached: [],
+      fills: [{ name: "Manure", fillType: "MANURE", fillLevel: 200, capacity: 12000 }],
+      damage: 0.04,
+    },
   ];
+
+  let listed: Vehicle[] = vehicles;
+  let multiplayer = false;
+  let localFarmId: number | null = null;
+  let farms: GameState["farms"];
+  let players: GameState["players"];
+  if (multiplayerMock()) {
+    listed = vehicles.map((vehicle) => ({ ...vehicle, farmId: 1, farmName: "My Farm" }));
+    listed.push({
+      id: "v-neighbor-1",
+      name: "John Deere 6R",
+      type: "tractor",
+      category: "vehicle",
+      x: -420,
+      z: -220 + Math.sin(rad) * 30,
+      heading: Math.PI,
+      speed: 6,
+      engineOn: true,
+      occupied: true,
+      attached: ["Cultivator"],
+      fills: [{ name: "Diesel", fillLevel: 180, capacity: 400 }],
+      damage: 0.2,
+      farmId: 2,
+      farmName: "North Fields",
+    });
+    const enabled = mockEnabledFarmIds ?? [1];
+    listed = listed.filter((vehicle) => {
+      const farmId = vehicle.farmId;
+      return farmId == null || farmId <= 0 || enabled.includes(farmId);
+    });
+    multiplayer = true;
+    localFarmId = 1;
+    farms = [
+      { id: 1, name: "My Farm", color: "#e2b657", balance: 248500, loan: 150000, equity: 980000 },
+      { id: 2, name: "North Fields", color: "#7eb6ff", balance: 81200, loan: 0, equity: 240000 },
+    ];
+    players = [
+      {
+        id: "local|Host",
+        name: "Host",
+        x: Math.cos(rad) * 180,
+        z: Math.sin(rad) * 140,
+        heading: ((phase + 90) % 360) * (Math.PI / 180),
+        farmId: 1,
+      },
+      {
+        id: "user|2|Alex",
+        name: "Alex",
+        x: -380,
+        z: 260 + Math.cos(rad) * 24,
+        heading: Math.PI / 2,
+        farmId: 2,
+      },
+    ];
+  }
 
   const fields = Array.from({ length: 12 }, (_, i) => {
     const col = i % 4;
@@ -173,8 +328,13 @@ export function createMockState(t = Date.now()): GameState {
     const fruit = FRUITS[i % FRUITS.length];
     const growthMax = 8;
     const growthState = clamp(Math.floor(((phase / 40 + i * 1.7) % growthMax) + 1), 1, growthMax);
+    const cropState = growthState >= growthMax - 1 ? "Ready to harvest" : "Growing";
+    const fertilizerLevel = i % 3;
+    const soils = ["Loam", "Sandy Loam", "Silty Clay", "Loamy Sand"] as const;
+    const phStatuses = ["Optimal", "Low", "High"] as const;
     return {
       id: `field-${i + 1}`,
+      name: String(i + 1),
       fruitType: fruit,
       growthState,
       growthMax,
@@ -187,6 +347,27 @@ export function createMockState(t = Date.now()): GameState {
         { x: ox + w, z: oz + h },
         { x: ox, z: oz + h },
       ],
+      areaHa: Math.round(((w * h) / 10000) * 100) / 100,
+      cropState,
+      needsRolling: cropState === "Growing" && growthState <= 3,
+      needsFertilizer: fertilizerLevel < 2,
+      fertilizerLevel,
+      fertilizerMax: 2,
+      weeds: (["None", "Growing", "Small", "Medium", "Large", "Partial", "Withered"] as const)[i % 7],
+      needsSpraying: i % 7 !== 0 && i % 7 !== 6,
+      needsPlowing: i % 4 === 0,
+      needsLime: i % 5 === 0,
+      needsStones: null,
+      precisionFarming:
+        i % 4 === 0
+          ? {
+              soilType: soils[i % soils.length] ?? "Loam",
+              ph: Math.round((5.8 + (i % 5) * 0.35) * 100) / 100,
+              phStatus: phStatuses[i % phStatuses.length] ?? "Optimal",
+              nitrogen: 70 + i * 12,
+              nitrogenTarget: 160,
+            }
+          : null,
     };
   });
 
@@ -233,7 +414,16 @@ export function createMockState(t = Date.now()): GameState {
     source: "mock",
     mapName: "Riverbend Mock",
     mapSize,
-    vehicles,
+    customEnvironment: null,
+    mapDirectory: null,
+    missionDirectory: null,
+    calendar: {
+      period: (Math.floor(t / 24000) % 12) + 1,
+      day: (Math.floor(t / 8000) % 3) + 1,
+      daysPerPeriod: 3,
+    },
+    vehicles: listed,
+    ...(multiplayer ? { multiplayer: true as const, localFarmId, farms, players } : {}),
     weather: {
       condition,
       temperatureC,
@@ -289,6 +479,34 @@ export function createMockState(t = Date.now()): GameState {
           { name: "Electric Charge", fillLevel: null, capacity: null },
         ],
       },
+      {
+        id: "prod-universal",
+        name: "Universal Production",
+        status: "active",
+        lines: [
+          { name: "Flour", status: "RUNNING", enabled: true },
+          { name: "Bread", status: "MISSING_INPUTS", enabled: true },
+          { name: "Cake", status: "INACTIVE", enabled: false },
+          { name: "Butter", status: "INACTIVE", enabled: false },
+          { name: "Cheese", status: "INACTIVE", enabled: false },
+          { name: "Chocolate", status: "INACTIVE", enabled: false },
+          { name: "Sugar", status: "INACTIVE", enabled: false },
+          { name: "Clothes", status: "INACTIVE", enabled: false },
+          { name: "Furniture", status: "INACTIVE", enabled: false },
+          { name: "Cement", status: "INACTIVE", enabled: false },
+          { name: "Sunflower Oil", status: "INACTIVE", enabled: false },
+          { name: "Canola Oil", status: "INACTIVE", enabled: false },
+          { name: "Grape Juice", status: "INACTIVE", enabled: false },
+          { name: "Raisins", status: "INACTIVE", enabled: false },
+          { name: "Noodles", status: "INACTIVE", enabled: false },
+          { name: "Tofu", status: "INACTIVE", enabled: false },
+        ],
+        inputs: [
+          { name: "Wheat", fillLevel: 8000, capacity: 50000 },
+          { name: "Milk", fillLevel: 1200, capacity: 20000 },
+        ],
+        outputs: [{ name: "Flour", fillLevel: 2400, capacity: 20000 }],
+      },
     ],
     animals: [
       {
@@ -301,9 +519,12 @@ export function createMockState(t = Date.now()): GameState {
         productivity: 88,
         herds: [{ name: "Holstein", count: 42 }],
         fills: [
-          { name: "Hay (40%)", fillLevel: 4000, capacity: 12000 },
-          { name: "Water", fillLevel: 1800, capacity: 3000 },
-          { name: "Milk", fillLevel: 900, capacity: 2000 },
+          { name: "Hay (40%)", fillLevel: 4000, capacity: 12000, usage: "food" as const, role: "input" as const },
+          { name: "Silage (40%)", fillLevel: 200, capacity: 12000, usage: "food" as const, role: "input" as const },
+          { name: "Water", fillLevel: 120, capacity: 3000, usage: "water" as const, role: "input" as const },
+          { name: "Straw", fillLevel: 0, capacity: 8000, usage: "straw" as const, role: "input" as const },
+          { name: "Milk", fillLevel: 1900, capacity: 2000, usage: "product" as const, role: "output" as const },
+          { name: "Manure", fillLevel: 7600, capacity: 8000, usage: "product" as const, role: "output" as const },
         ],
         palletBlocked: false,
         x: -400,
@@ -316,6 +537,13 @@ export function createMockState(t = Date.now()): GameState {
         count: 86,
         health: 0.85,
         productivity: 0.79,
+        fills: [
+          { name: "Grain (50%)", fillLevel: 40, capacity: 5000, usage: "food" as const, role: "input" as const },
+          { name: "Corn (50%)", fillLevel: 20, capacity: 5000, usage: "food" as const, role: "input" as const },
+          { name: "Water", fillLevel: 2000, capacity: 2500, usage: "water" as const, role: "input" as const },
+          { name: "Slurry", fillLevel: 4800, capacity: 5000, usage: "product" as const, role: "output" as const },
+        ],
+        palletBlocked: true,
         x: 420,
         z: 160,
       },
@@ -361,6 +589,20 @@ export function createMockAutoDrive(): AutoDriveGraph {
       { id: 1, name: "Farm", x: -200, z: -80 },
       { id: 2, name: "Shop", x: 360, z: 80 },
       { id: 3, name: "Silo", x: -80, z: 320 },
+    ],
+  };
+}
+
+/** Saved courses so the Courseplay card can be checked without the game. */
+export function createMockCourseplay(): CourseplayCourses {
+  return {
+    type: "courseplay",
+    available: true,
+    revision: 1,
+    courses: [
+      { id: "field-12-cultivate", name: "Cultivate", folder: "Field 12", vehicles: 5 },
+      { id: "field-12-harvest", name: "Harvest", folder: "Field 12", vehicles: 2 },
+      { id: "field-3-seed", name: "Seed", folder: "Field 3", vehicles: 1 },
     ],
   };
 }

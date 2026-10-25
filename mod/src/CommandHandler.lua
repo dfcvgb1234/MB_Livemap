@@ -10,6 +10,10 @@ local ALLOWED = {
     ["detach"] = true,
     ["autodrive.start"] = true,
     ["autodrive.stop"] = true,
+    ["courseplay.start"] = true,
+    ["courseplay.stop"] = true,
+    ["field.scan"] = true,
+    ["field.sample"] = true,
 }
 
 local FILL_NAME_CANDIDATES = {
@@ -85,8 +89,70 @@ local function findVehicleById(vehicleId)
     return nil
 end
 
-function CommandHandler.new()
-    return setmetatable({}, CommandHandler)
+function CommandHandler.new(bridge)
+    local self = setmetatable({}, CommandHandler)
+    self.bridge = bridge
+    return self
+end
+
+function CommandHandler:startFieldScan(cmd)
+    local id = cmd.id or "unknown"
+    local x = tonumber(cmd.x)
+    local z = tonumber(cmd.z)
+    if x == nil or z == nil then
+        return { type = "commandResult", id = id, ok = false, error = "Missing scan position" }
+    end
+    local bridge = self.bridge
+    if bridge == nil or bridge.scanner == nil or bridge.collector == nil then
+        return { type = "commandResult", id = id, ok = false, error = "Field scan is not available" }
+    end
+    local started, err = bridge.scanner:start(x, z, function(ok, payload)
+        local result
+        if not ok then
+            local message = type(payload) == "string" and payload or "Field scan failed"
+            result = { type = "commandResult", id = id, ok = false, error = message }
+        else
+            local points = type(payload) == "table" and payload.points or nil
+            local interiorX = type(payload) == "table" and payload.interiorX or x
+            local interiorZ = type(payload) == "table" and payload.interiorZ or z
+            local committed, commitErr = bridge.collector:commitScan(points, x, z, interiorX, interiorZ)
+            if not committed then
+                result = { type = "commandResult", id = id, ok = false, error = commitErr or "Field scan failed" }
+            else
+                result = { type = "commandResult", id = id, ok = true }
+                bridge:sendSnapshot({ fields = true })
+            end
+        end
+        if Logging ~= nil and Logging.info ~= nil then
+            Logging.info("[MB Livemap] field scan %s", result.ok and "finished" or tostring(result.error))
+        end
+        bridge.tcp:sendLine(Json.encode(result))
+    end)
+    if not started then
+        return { type = "commandResult", id = id, ok = false, error = err or "A field scan is already running" }
+    end
+    return nil
+end
+
+function CommandHandler:sampleField(cmd)
+    local id = cmd.id or "unknown"
+    local x = tonumber(cmd.x)
+    local z = tonumber(cmd.z)
+    if x == nil or z == nil then
+        return { type = "commandResult", id = id, ok = false, error = "Missing sample position" }
+    end
+    local bridge = self.bridge
+    if bridge == nil or bridge.collector == nil or bridge.collector.sampleFieldPoint == nil then
+        return { type = "commandResult", id = id, ok = false, error = "Field sample is not available" }
+    end
+    local sample = nil
+    local ok = pcall(function()
+        sample = bridge.collector:sampleFieldPoint(x, z)
+    end)
+    if not ok or type(sample) ~= "table" then
+        return { type = "commandResult", id = id, ok = false, error = "Could not sample this position" }
+    end
+    return { type = "commandResult", id = id, ok = true, field = sample }
 end
 
 local function localPlayer()
@@ -95,6 +161,57 @@ local function localPlayer()
     end
     if g_currentMission ~= nil and g_currentMission.playerSystem ~= nil and g_currentMission.playerSystem.getLocalPlayer ~= nil then
         return g_currentMission.playerSystem:getLocalPlayer()
+    end
+    return nil
+end
+
+local function isHostedMultiplayer()
+    if g_dedicatedServer ~= nil or g_dedicatedServerInfo ~= nil then
+        return false
+    end
+    local mission = g_currentMission
+    if mission == nil then
+        return false
+    end
+    local info = mission.missionDynamicInfo
+    if type(info) ~= "table" or info.isMultiplayer ~= true then
+        return false
+    end
+    if mission.getIsServer ~= nil then
+        local ok, isServer = pcall(function()
+            return mission:getIsServer()
+        end)
+        if not ok or isServer ~= true then
+            return false
+        end
+    end
+    return true
+end
+
+local function rawOwnerFarmId(vehicle)
+    if vehicle ~= nil and vehicle.getOwnerFarmId ~= nil then
+        local ok, id = pcall(function()
+            return vehicle:getOwnerFarmId()
+        end)
+        if ok and type(id) == "number" then
+            return id
+        end
+    end
+    if vehicle ~= nil and type(vehicle.ownerFarmId) == "number" then
+        return vehicle.ownerFarmId
+    end
+    return nil
+end
+
+local function commandFarmId()
+    local player = localPlayer()
+    if player ~= nil and player.getFarmId ~= nil then
+        local ok, id = pcall(function()
+            return player:getFarmId()
+        end)
+        if ok and type(id) == "number" and id > 0 then
+            return id
+        end
     end
     return nil
 end
@@ -197,9 +314,24 @@ function CommandHandler:handle(cmd)
         return { type = "commandResult", id = id, ok = false, error = "Unsupported action: " .. tostring(action) }
     end
 
+    if action == "field.scan" then
+        return self:startFieldScan(cmd)
+    end
+    if action == "field.sample" then
+        return self:sampleField(cmd)
+    end
+
     local vehicle = findVehicleById(cmd.vehicleId)
     if vehicle == nil then
         return { type = "commandResult", id = id, ok = false, error = "Vehicle not found" }
+    end
+
+    if isHostedMultiplayer() then
+        local owner = rawOwnerFarmId(vehicle)
+        local mine = commandFarmId()
+        if type(owner) ~= "number" or owner <= 0 or mine == nil or owner ~= mine then
+            return { type = "commandResult", id = id, ok = false, error = "Vehicle is not on your farm" }
+        end
     end
 
     local ok, err = pcall(function()
@@ -247,6 +379,12 @@ function CommandHandler:handle(cmd)
             if modeName == nil or modeName == "" then
                 modeName = "drive"
             end
+            if modeName == "fieldwork" then
+                if CourseplaySync == nil or CourseplaySync.startFieldwork == nil then
+                    error("Courseplay is not loaded")
+                end
+                CourseplaySync.startFieldwork(vehicle, cmd.targetId, tonumber(cmd.cpLane), cmd.cpStart)
+            else
             local modeNumber = nil
             local needsSecond = false
             local needsFill = false
@@ -309,11 +447,29 @@ function CommandHandler:handle(cmd)
             if vehicle.ad.stateModule.isActive ~= nil and not vehicle.ad.stateModule:isActive() then
                 error("AutoDrive did not start")
             end
+            end
         elseif action == "autodrive.stop" then
+            if CourseplaySync ~= nil and CourseplaySync.cancelHandoff ~= nil then
+                local stopId = vehicle.id
+                if stopId == nil and vehicle.rootNode ~= nil then
+                    stopId = vehicle.rootNode
+                end
+                CourseplaySync.cancelHandoff(stopId)
+            end
             if vehicle.stopAutoDrive == nil then
                 error("AutoDrive is not available on this vehicle")
             end
             vehicle:stopAutoDrive()
+        elseif action == "courseplay.start" then
+            if CourseplaySync == nil or CourseplaySync.startCourse == nil then
+                error("Courseplay is not loaded")
+            end
+            CourseplaySync.startCourse(vehicle, cmd.targetId, cmd.cpStart, tonumber(cmd.cpLane))
+        elseif action == "courseplay.stop" then
+            if CourseplaySync == nil or CourseplaySync.stop == nil then
+                error("Courseplay is not loaded")
+            end
+            CourseplaySync.stop(vehicle)
         elseif action == "detach" then
             if vehicle.detachImplement ~= nil then
                 -- Detach first implement when index API is present.
@@ -328,7 +484,7 @@ function CommandHandler:handle(cmd)
                 error("detach API unavailable")
             end
         end
-        wakeVehicle(vehicle, action ~= "engine.stop" and action ~= "autodrive.stop")
+        wakeVehicle(vehicle, action ~= "engine.stop" and action ~= "autodrive.stop" and action ~= "courseplay.stop")
         enterVehicle(vehicle)
     end)
 

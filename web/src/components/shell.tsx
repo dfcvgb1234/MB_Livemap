@@ -3,17 +3,15 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, Settings } from "lucide-react";
+import { ConnectButton, ConnectProvider, ConnectSheet, ModBanner } from "@/components/connect-sheet";
 import { LivemapProvider, useLivemapContext } from "@/components/livemap-provider";
+import { MapOverlayPrompt } from "@/components/map-overlay-prompt";
 import { NotificationHistorySheet } from "@/components/notification-history-sheet";
 import { SettingsProvider, useSettings } from "@/components/settings-provider";
-import { SettingsSheet } from "@/components/settings-sheet";
+import { SettingsDialog } from "@/components/settings-dialog";
 import { NotificationProvider, ToastStack, useNotificationCenter } from "@/components/toast-stack";
+import { driverPageLabel } from "@/lib/driver-page";
 import { cn } from "@/lib/utils";
-
-const NAV = [
-  { href: "/", label: "Livemap" },
-  { href: "/autodrive", label: "AutoDrive" },
-] as const;
 
 function formatUpdated(ts: number | null | undefined) {
   if (!ts) return "No update yet";
@@ -21,7 +19,12 @@ function formatUpdated(ts: number | null | undefined) {
 }
 
 function ShellInner({ children }: { children: React.ReactNode }) {
-  const { state, bridgeStatus } = useLivemapContext();
+  const { state, bridgeStatus, autoDrive, courseplay } = useLivemapContext();
+  const driverLabel = driverPageLabel(autoDrive?.available === true, courseplay?.available === true);
+  const nav = [
+    { href: "/", label: "Livemap" },
+    ...(driverLabel ? [{ href: "/autodrive", label: driverLabel }] : []),
+  ];
   const { setOpen } = useSettings();
   const { history, setHistoryOpen } = useNotificationCenter();
   const pathname = usePathname();
@@ -29,7 +32,8 @@ function ShellInner({ children }: { children: React.ReactNode }) {
   const fields = state?.fields.length ?? 0;
 
   return (
-    <div className="flex h-dvh flex-col bg-[radial-gradient(circle_at_top_left,rgba(226,182,87,0.08),transparent_28%),#17140f] text-[#f3efe4]">
+    <div className="flex h-svh flex-col bg-[radial-gradient(circle_at_top_left,rgba(226,182,87,0.08),transparent_28%),#17140f] text-[#f3efe4]">
+      <ModBanner />
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-[18px] py-3.5">
         <div className="flex min-w-0 items-center gap-3">
           <span className="grid size-[42px] shrink-0 place-items-center rounded-lg bg-[#e2b657] text-base font-bold text-[#2a2112]">
@@ -43,7 +47,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <nav className="flex items-center gap-1 rounded-xl bg-black/25 p-1">
-          {NAV.map(({ href, label }) => {
+          {nav.map(({ href, label }) => {
             const active = href === "/" ? pathname === "/" : pathname.startsWith(href);
             return (
               <Link
@@ -79,6 +83,7 @@ function ShellInner({ children }: { children: React.ReactNode }) {
               </span>
             ) : null}
           </button>
+          <ConnectButton />
           <button
             type="button"
             aria-label="Settings"
@@ -89,10 +94,12 @@ function ShellInner({ children }: { children: React.ReactNode }) {
           </button>
         </div>
       </header>
-      <div className="min-h-0 flex-1 overflow-auto">{children}</div>
+      <div className="min-h-0 flex-1 overflow-auto [container-type:size] [overflow-anchor:none]">{children}</div>
       <ToastStack />
       <NotificationHistorySheet />
-      <SettingsSheet />
+      <SettingsDialog />
+      <ConnectSheet />
+      <MapOverlayPrompt />
     </div>
   );
 }
@@ -102,7 +109,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <LivemapProvider>
       <SettingsProvider>
         <NotificationProvider>
-          <ShellInner>{children}</ShellInner>
+          <ConnectProvider>
+            <ShellInner>{children}</ShellInner>
+          </ConnectProvider>
         </NotificationProvider>
       </SettingsProvider>
     </LivemapProvider>

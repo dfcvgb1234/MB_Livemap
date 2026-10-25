@@ -3,10 +3,51 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CROP_CALENDAR } from "@/lib/crop-calendar";
-import type { AutoDriveMarker, AutoDriveMode, CommandResult, ProductionFill, Vehicle, WhitelistAction } from "@/lib/types";
+import type { AutoDriveMarker, AutoDriveMode, CommandResult, CourseplayStart, ProductionFill, Vehicle, WhitelistAction } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
+
+const VEHICLE_SCROLL_MS = 180;
+
+function scrollableParent(element: HTMLElement): HTMLElement | null {
+  let node = element.parentElement;
+  while (node != null) {
+    const overflow = getComputedStyle(node).overflowY;
+    if ((overflow === "auto" || overflow === "scroll") && node.scrollHeight > node.clientHeight + 1) {
+      return node;
+    }
+    node = node.parentElement;
+  }
+  const root = document.scrollingElement;
+  if (root instanceof HTMLElement && root.scrollHeight > root.clientHeight + 1) return root;
+  return null;
+}
+
+function smoothScrollIntoView(element: HTMLElement, durationMs: number): () => void {
+  let frame = 0;
+  const cancel = () => cancelAnimationFrame(frame);
+  const parent = scrollableParent(element);
+  const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (parent == null || reduceMotion) {
+    element.scrollIntoView({ block: "start" });
+    return cancel;
+  }
+  const target =
+    parent.scrollTop + (element.getBoundingClientRect().top - parent.getBoundingClientRect().top);
+  const start = parent.scrollTop;
+  const delta = target - start;
+  if (Math.abs(delta) < 1) return cancel;
+  const started = performance.now();
+  const tick = (now: number) => {
+    const progress = Math.min(1, (now - started) / durationMs);
+    const eased = 1 - (1 - progress) * (1 - progress);
+    parent.scrollTop = start + delta * eased;
+    if (progress < 1) frame = requestAnimationFrame(tick);
+  };
+  frame = requestAnimationFrame(tick);
+  return cancel;
+}
 
 function formatAmount(value: number | null) {
   if (value == null) return "—";
@@ -76,6 +117,7 @@ function autoDriveStatus(vehicle: Vehicle) {
   if (vehicle.adMode === "deliver") return `Delivering to ${first}`;
   if (vehicle.adMode === "load") return `Loading at ${second}, then driving to ${first}`;
   if (vehicle.adMode === "unload") return `Unloading combine from ${first} to ${second}`;
+  if (vehicle.adMode === "fieldwork") return `Driving to the field for ${first}`;
   return `Driving to ${first}`;
 }
 
@@ -131,6 +173,9 @@ function AutoDriveControls({
   destinationId,
   secondId,
   fillId,
+  courseId,
+  cpLane,
+  courseplayAvailable,
   pending,
   embedded,
   onJobMode,
@@ -146,6 +191,9 @@ function AutoDriveControls({
   destinationId: string;
   secondId: string;
   fillId: string;
+  courseId: string;
+  cpLane?: number;
+  courseplayAvailable: boolean;
   pending: boolean;
   embedded: boolean;
   onJobMode: (mode: AutoDriveMode) => void;
@@ -155,9 +203,15 @@ function AutoDriveControls({
   onStart: () => void;
   onStop: () => void;
 }) {
-  const needsSecond = jobMode === "pickup" || jobMode === "load" || jobMode === "unload";
-  const needsFill = jobMode === "pickup" || jobMode === "load";
-  const ready = destinationId !== "" && (!needsSecond || secondId !== "") && (!needsFill || fillId !== "");
+  const fieldwork = jobMode === "fieldwork";
+  const needsSecond = !fieldwork && (jobMode === "pickup" || jobMode === "load" || jobMode === "unload");
+  const needsFill = !fieldwork && (jobMode === "pickup" || jobMode === "load");
+  const ready = fieldwork
+    ? courseId !== "" && vehicle.cpCapable === true
+    : destinationId !== "" && (!needsSecond || secondId !== "") && (!needsFill || fillId !== "");
+  const jobModes = courseplayAvailable
+    ? [...JOB_MODES, { id: "fieldwork" as const, label: "Drive to fieldwork" }]
+    : JOB_MODES;
 
   return (
     <div className="mt-4">
@@ -178,46 +232,61 @@ function AutoDriveControls({
             value={jobMode}
             onChange={(event) => onJobMode(event.target.value as AutoDriveMode)}
           >
-            {JOB_MODES.map((item) => (
+            {jobModes.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.label}
               </option>
             ))}
           </select>
-          <MarkerSelect
-            id="ad-destination"
-            label={primaryLabel(jobMode)}
-            value={destinationId}
-            placeholder="Choose a destination"
-            markers={destinations}
-            onChange={onDestination}
-          />
-          {needsSecond ? (
-            <MarkerSelect
-              id="ad-second"
-              label={secondLabel(jobMode)}
-              value={secondId}
-              placeholder="Choose a destination"
-              markers={destinations}
-              onChange={onSecond}
-            />
+          {fieldwork ? (
+            <p className="mt-2 text-[13px] text-[#b7b1a4]">
+              {vehicle.cpCapable !== true
+                ? "This vehicle does not support Courseplay."
+                : courseId === ""
+                  ? "Choose a course in the Courseplay card."
+                  : cpLane == null
+                    ? "Drives to the field, then starts the course at the chosen waypoint."
+                    : "Drives to the field, then starts the course at the chosen waypoint on the chosen row."}
+            </p>
           ) : null}
-          {needsFill ? (
+          {fieldwork ? null : (
             <>
-              <label className="mt-3 block text-[13px] text-[#b7b1a4]" htmlFor="ad-fruit">
-                Fruit type
-              </label>
-              <select id="ad-fruit" className={SELECT_CLASS} value={fillId} onChange={(event) => onFill(event.target.value)}>
-                <option value="">Choose a fruit type</option>
-                {CROP_CALENDAR.map((crop) => (
-                  <option key={crop.fruit} value={crop.fruit}>
-                    {crop.label}
-                  </option>
-                ))}
-              </select>
+              <MarkerSelect
+                id="ad-destination"
+                label={primaryLabel(jobMode)}
+                value={destinationId}
+                placeholder="Choose a destination"
+                markers={destinations}
+                onChange={onDestination}
+              />
+              {needsSecond ? (
+                <MarkerSelect
+                  id="ad-second"
+                  label={secondLabel(jobMode)}
+                  value={secondId}
+                  placeholder="Choose a destination"
+                  markers={destinations}
+                  onChange={onSecond}
+                />
+              ) : null}
+              {needsFill ? (
+                <>
+                  <label className="mt-3 block text-[13px] text-[#b7b1a4]" htmlFor="ad-fruit">
+                    Fruit type
+                  </label>
+                  <select id="ad-fruit" className={SELECT_CLASS} value={fillId} onChange={(event) => onFill(event.target.value)}>
+                    <option value="">Choose a fruit type</option>
+                    {CROP_CALENDAR.map((crop) => (
+                      <option key={crop.fruit} value={crop.fruit}>
+                        {crop.label}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              ) : null}
             </>
-          ) : null}
-          {destinations.length === 0 ? (
+          )}
+          {!fieldwork && destinations.length === 0 ? (
             <p className="mt-2 text-[13px] text-[#b7b1a4]">No named destinations in the network.</p>
           ) : null}
           <div className="mt-3 grid grid-cols-2 gap-3">
@@ -251,6 +320,8 @@ type CommandExtra = {
   mode?: AutoDriveMode;
   secondTargetId?: string;
   fillType?: string;
+  cpLane?: number;
+  cpStart?: CourseplayStart;
 };
 
 type Props = {
@@ -262,7 +333,17 @@ type Props = {
   embedded?: boolean;
   /** livemap links across. autodrive starts and stops a drive. */
   mode?: "livemap" | "autodrive";
+  /** Header label for the driver page. The livemap link is hidden when this is empty. */
+  driverLabel?: string | null;
+  /** AutoDrive network is loaded. Hides route controls when it is not. */
+  autoDriveAvailable?: boolean;
   markers?: AutoDriveMarker[];
+  courseplayAvailable?: boolean;
+  courseId?: string;
+  cpLane?: number;
+  cpStart?: CourseplayStart;
+  /** False for a vehicle that is not on the host's farm. Stats stay visible. */
+  allowCommands?: boolean;
 };
 
 export function VehicleSheet({
@@ -273,7 +354,14 @@ export function VehicleSheet({
   lastResult,
   embedded = false,
   mode = "livemap",
+  driverLabel = null,
+  autoDriveAvailable = false,
   markers = [],
+  courseplayAvailable = false,
+  courseId = "",
+  cpLane,
+  cpStart,
+  allowCommands = true,
 }: Props) {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -308,7 +396,9 @@ export function VehicleSheet({
 
   useEffect(() => {
     if (!embedded || vehicle == null) return;
-    cardRef.current?.scrollIntoView({ block: "start" });
+    const card = cardRef.current;
+    if (card == null) return;
+    return smoothScrollIntoView(card, VEHICLE_SCROLL_MS);
   }, [embedded, vehicle?.id]);
 
   useEffect(() => {
@@ -317,6 +407,10 @@ export function VehicleSheet({
     setFillId("");
     setJobMode("drive");
   }, [vehicle?.id]);
+
+  useEffect(() => {
+    if (jobMode === "fieldwork" && !courseplayAvailable) setJobMode("drive");
+  }, [jobMode, courseplayAvailable]);
 
   const run = (action: WhitelistAction, targetId?: string, extra?: CommandExtra) => {
     if (!vehicle) return;
@@ -350,6 +444,7 @@ export function VehicleSheet({
             ? "Trailer"
             : (vehicle.type ?? "Vehicle")}{" "}
         · {Math.round(vehicle.speed)} km/h
+        {vehicle.farmName ? ` · ${vehicle.farmName}` : ""}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <Badge
@@ -404,7 +499,7 @@ export function VehicleSheet({
           </ul>
         )}
       </div>
-      {vehicle.category === "implement" || vehicle.category === "trailer" ? null : (
+      {!allowCommands || vehicle.category === "implement" || vehicle.category === "trailer" ? null : (
       <div className="mt-4 grid grid-cols-2 gap-3">
         <Button
           size="lg"
@@ -443,15 +538,15 @@ export function VehicleSheet({
         </Button>
       </div>
       )}
-      {drivable && mode === "livemap" ? (
+      {allowCommands && drivable && mode === "livemap" && driverLabel ? (
         <Link
           href={`/autodrive?vehicle=${encodeURIComponent(vehicle.id)}`}
-          className="mt-3 flex min-h-12 items-center justify-center rounded-lg bg-[#e2b657] px-4 text-sm font-semibold text-[#2a2112] hover:bg-[#ebc56f]"
+          className="mt-3 flex min-h-12 items-center justify-center rounded-lg bg-[#e2b657] px-4 text-center text-sm font-semibold text-[#2a2112] hover:bg-[#ebc56f]"
         >
-          Open in AutoDrive
+          Open in {driverLabel}
         </Link>
       ) : null}
-      {drivable && mode === "autodrive" ? (
+      {allowCommands && drivable && mode === "autodrive" && autoDriveAvailable ? (
         <AutoDriveControls
           vehicle={vehicle}
           destinations={destinations}
@@ -459,6 +554,9 @@ export function VehicleSheet({
           destinationId={destinationId}
           secondId={secondId}
           fillId={fillId}
+          courseId={courseId}
+          cpLane={cpLane}
+          courseplayAvailable={courseplayAvailable}
           pending={!!pendingId}
           embedded={embedded}
           onJobMode={(next) => {
@@ -470,10 +568,12 @@ export function VehicleSheet({
           onSecond={setSecondId}
           onFill={setFillId}
           onStart={() =>
-            run("autodrive.start", destinationId, {
+            run("autodrive.start", jobMode === "fieldwork" ? courseId : destinationId, {
               mode: jobMode,
-              secondTargetId: secondId || undefined,
-              fillType: fillId || undefined,
+              secondTargetId: jobMode === "fieldwork" ? undefined : secondId || undefined,
+              fillType: jobMode === "fieldwork" ? undefined : fillId || undefined,
+              cpLane: jobMode === "fieldwork" ? cpLane : undefined,
+              cpStart: jobMode === "fieldwork" ? cpStart : undefined,
             })
           }
           onStop={() => run("autodrive.stop")}

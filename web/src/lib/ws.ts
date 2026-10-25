@@ -1,8 +1,10 @@
 import type {
   AutoDriveGraph,
   AutoDriveMode,
+  CourseplayCourses,
   CommandMessage,
   CommandResult,
+  CourseplayStart,
   GameState,
   LivemapNotification,
   StatusMessage,
@@ -14,14 +16,37 @@ export function defaultWsUrl() {
   const fromEnv = process.env.NEXT_PUBLIC_WS_URL;
   if (fromEnv) return fromEnv;
   const host = window.location.hostname || "127.0.0.1";
-  return `ws://${host}:18766`;
+  // `next dev` keeps the socket on 18766. The packaged app serves the page
+  // and the socket on the same port, so a tablet follows the address it opened.
+  if (process.env.NODE_ENV === "development") return `ws://${host}:18766`;
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${protocol}//${window.location.host || host}`;
+}
+
+export function bridgeHttpUrl() {
+  const fromEnv = process.env.NEXT_PUBLIC_HTTP_URL?.trim().replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
+  if (typeof window === "undefined") return "http://127.0.0.1:18767";
+  if (process.env.NODE_ENV === "development") {
+    const host = window.location.hostname || "127.0.0.1";
+    return `http://${host}:18767`;
+  }
+  return window.location.origin;
 }
 
 export function createCommand(
   action: WhitelistAction,
   vehicleId: string,
   targetId?: string,
-  extra?: { mode?: AutoDriveMode; secondTargetId?: string; fillType?: string },
+  extra?: {
+    mode?: AutoDriveMode;
+    secondTargetId?: string;
+    fillType?: string;
+    cpStart?: CourseplayStart;
+    cpLane?: number;
+    x?: number;
+    z?: number;
+  },
 ): CommandMessage {
   return {
     type: "command",
@@ -35,12 +60,17 @@ export function createCommand(
     ...(extra?.mode ? { mode: extra.mode } : {}),
     ...(extra?.secondTargetId ? { secondTargetId: extra.secondTargetId } : {}),
     ...(extra?.fillType ? { fillType: extra.fillType } : {}),
+    ...(extra?.cpStart ? { cpStart: extra.cpStart } : {}),
+    ...(extra?.cpLane != null ? { cpLane: extra.cpLane } : {}),
+    ...(extra?.x != null ? { x: extra.x } : {}),
+    ...(extra?.z != null ? { z: extra.z } : {}),
   };
 }
 
 export type WsHandlers = {
   onState?: (state: GameState) => void;
   onAutoDrive?: (graph: AutoDriveGraph) => void;
+  onCourseplay?: (courses: CourseplayCourses) => void;
   onStatus?: (status: StatusMessage) => void;
   onCommandResult?: (result: CommandResult) => void;
   onNotification?: (note: LivemapNotification) => void;
@@ -100,6 +130,8 @@ export class LivemapSocket {
       if (typed.type === "state") this.handlers.onState?.(msg as GameState);
       else if (typed.type === "autodrive")
         this.handlers.onAutoDrive?.(msg as AutoDriveGraph);
+      else if (typed.type === "courseplay")
+        this.handlers.onCourseplay?.(msg as CourseplayCourses);
       else if (typed.type === "status")
         this.handlers.onStatus?.(msg as StatusMessage);
       else if (typed.type === "commandResult")
@@ -112,8 +144,12 @@ export class LivemapSocket {
   }
 
   sendCommand(cmd: CommandMessage) {
+    return this.send(cmd);
+  }
+
+  send(message: unknown) {
     if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(cmd));
+      this.ws.send(JSON.stringify(message));
       return true;
     }
     return false;

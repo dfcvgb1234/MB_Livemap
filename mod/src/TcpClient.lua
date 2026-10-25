@@ -6,12 +6,13 @@
 TcpClient = {}
 TcpClient.__index = TcpClient
 
-local HOST = "127.0.0.1"
+local HOST = "0.0.0.0"
 local PORT = 18765
 local PIPE_PATH = "\\\\.\\pipe\\mb-livemap"
 local RECONNECT_INTERVAL_MS = 3000
 local COMMAND_POLL_MS = 200
 local SESSION_POLL_MS = 2000
+local PERFORMANCE_POLL_MS = 1000
 
 local function tryRequireSocket()
     local ok, sock = pcall(function()
@@ -41,6 +42,14 @@ function TcpClient.new(host, port)
     self.sessionId = nil
     self.commandPath = nil
     self.sessionPath = nil
+    self.farmFilterPath = nil
+    self.performancePath = nil
+    self.enabledFarmIds = nil
+    self.lastFarmPoll = 0
+    self.lastPerformancePoll = 0
+    self.farmFilterSignature = nil
+    self.performanceSignature = nil
+    self.onPerformance = nil
     self:initCommandFiles()
     return self
 end
@@ -63,6 +72,9 @@ function TcpClient:initCommandFiles()
     pcall(createFolder, dir)
     self.commandPath = dir .. "commands.xml"
     self.sessionPath = dir .. "session.xml"
+    self.farmFilterPath = dir .. "farms.xml"
+    self.performancePath = dir .. "performance.xml"
+    self.courseWatchPath = dir .. "coursewatch.txt"
     if deleteFile ~= nil and fileExists ~= nil and fileExists(self.commandPath) then
         pcall(deleteFile, self.commandPath)
     end
@@ -203,6 +215,105 @@ function TcpClient:checkSession()
     end
 end
 
+function TcpClient:pollFarmFilter()
+    if self.farmFilterPath == nil or XMLFile == nil then
+        return
+    end
+    local now = g_time or 0
+    if now - self.lastFarmPoll < COMMAND_POLL_MS then
+        return
+    end
+    self.lastFarmPoll = now
+
+    local xmlFile = nil
+    local ok = pcall(function()
+        xmlFile = XMLFile.loadIfExists("mbLivemapFarms", self.farmFilterPath)
+    end)
+    if not ok or xmlFile == nil then
+        self.enabledFarmIds = nil
+        self.farmFilterSignature = nil
+        return
+    end
+
+    local raw = nil
+    pcall(function()
+        raw = xmlFile:getString("farms#ids")
+    end)
+    pcall(function()
+        xmlFile:delete()
+    end)
+
+    local signature = raw or ""
+    if signature == self.farmFilterSignature and self.enabledFarmIds ~= nil then
+        return
+    end
+    self.farmFilterSignature = signature
+    local enabled = {}
+    for token in string.gmatch(signature, "[^,%s]+") do
+        local id = tonumber(token)
+        if id ~= nil and id > 0 then
+            enabled[id] = true
+        end
+    end
+    self.enabledFarmIds = enabled
+end
+
+function TcpClient:pollPerformance()
+    if self.performancePath == nil or XMLFile == nil then
+        return
+    end
+    local now = g_time or 0
+    if now - self.lastPerformancePoll < PERFORMANCE_POLL_MS then
+        return
+    end
+    self.lastPerformancePoll = now
+
+    local xmlFile = nil
+    local ok = pcall(function()
+        xmlFile = XMLFile.loadIfExists("mbLivemapPerformance", self.performancePath)
+    end)
+    if not ok or xmlFile == nil then
+        if self.performanceSignature ~= "" then
+            self.performanceSignature = ""
+            if self.onPerformance ~= nil then
+                self.onPerformance(nil)
+            end
+        end
+        return
+    end
+
+    local raw = {}
+    pcall(function()
+        raw.vehicles = xmlFile:getString("performance#vehicles")
+        raw.weather = xmlFile:getString("performance#weather")
+        raw.fields = xmlFile:getString("performance#fields")
+        raw.productions = xmlFile:getString("performance#productions")
+        raw.animals = xmlFile:getString("performance#animals")
+        raw.autodrive = xmlFile:getString("performance#autodrive")
+        raw.courseplay = xmlFile:getString("performance#courseplay")
+    end)
+    pcall(function()
+        xmlFile:delete()
+    end)
+
+    local signature = table.concat({
+        tostring(raw.vehicles),
+        tostring(raw.weather),
+        tostring(raw.fields),
+        tostring(raw.productions),
+        tostring(raw.animals),
+        tostring(raw.autodrive),
+        tostring(raw.courseplay),
+    }, ",")
+    if signature == self.performanceSignature then
+        return
+    end
+    self.performanceSignature = signature
+    if self.onPerformance ~= nil then
+        self.onPerformance(raw)
+    end
+end
+
 function TcpClient:pollCommand()
     if self.commandPath == nil or self.onLine == nil or XMLFile == nil then
         return
@@ -230,14 +341,24 @@ function TcpClient:pollCommand()
         local mode = xmlFile:getString("commands#mode")
         local secondTargetId = xmlFile:getString("commands#secondTargetId")
         local fillType = xmlFile:getString("commands#fillType")
-        if idStr ~= nil and idStr ~= "" and idStr ~= self.lastCommandId and action ~= nil and vehicleId ~= nil then
+        local cpStart = xmlFile:getString("commands#cpStart")
+        local cpLane = xmlFile:getString("commands#cpLane")
+        local scanX = xmlFile:getString("commands#x")
+        local scanZ = xmlFile:getString("commands#z")
+        local isPointCommand = action == "field.scan" or action == "field.sample"
+        local hasVehicle = vehicleId ~= nil and vehicleId ~= ""
+        if idStr ~= nil and idStr ~= "" and idStr ~= self.lastCommandId and action ~= nil and (hasVehicle or isPointCommand) then
             self.lastCommandId = idStr
             payload = {
                 type = "command",
                 id = idStr,
                 action = action,
-                vehicleId = vehicleId,
+                vehicleId = hasVehicle and vehicleId or "",
             }
+            if isPointCommand then
+                payload.x = tonumber(scanX)
+                payload.z = tonumber(scanZ)
+            end
             if targetId ~= nil and targetId ~= "" then
                 payload.targetId = targetId
             end
@@ -249,6 +370,12 @@ function TcpClient:pollCommand()
             end
             if fillType ~= nil and fillType ~= "" then
                 payload.fillType = fillType
+            end
+            if cpStart ~= nil and cpStart ~= "" then
+                payload.cpStart = cpStart
+            end
+            if cpLane ~= nil and cpLane ~= "" then
+                payload.cpLane = cpLane
             end
         end
     end)
@@ -265,6 +392,7 @@ end
 
 function TcpClient:updatePipe()
     self:checkSession()
+    self:pollFarmFilter()
     if self.pipe == nil then
         self:connect()
         return
@@ -273,10 +401,13 @@ function TcpClient:updatePipe()
 end
 
 function TcpClient:update()
+    self:pollPerformance()
     if self.socketLib == nil then
         self:updatePipe()
         return
     end
+
+    self:pollFarmFilter()
 
     if not self:isConnected() then
         self:connect()

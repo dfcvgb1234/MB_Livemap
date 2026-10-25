@@ -21,12 +21,10 @@ Lua mod that streams farm state to the local Node bridge and accepts whitelisted
 
 ## Protocol
 
-JSON lines over TCP:
+The mod writes one JSON object per line to the named pipe. Commands come back through `commands.xml`. The bridge turns that into the WebSocket a page connects to.
 
-- Outbound: `{ "type":"state", ... }`
-- Inbound commands: `{ "type":"command", "id":"...", "action":"engine.start|engine.stop|attach|detach", "vehicleId":"..." }`
-- Ack: `{ "type":"commandResult", "id":"...", "ok":true|false }`
+Message shapes, fields, and the command list are in [docs/WebSocket.md](../docs/WebSocket.md). How the pieces connect is in [docs/How-it-works.md](../docs/How-it-works.md).
 
 ## API gaps
 
-Where Giants APIs are missing or unverified, fields are sent as `null` (forecast, field polygons, some animal productivity metrics, attach without `targetId`). The web UI labels those as unsupported rather than inventing values.
+Where Giants APIs are missing or unverified, fields are sent as `null`. The web UI labels those as unsupported rather than inventing values. Attach needs a `targetId`. Some field outlines stay empty until a `field.scan` command traces them.

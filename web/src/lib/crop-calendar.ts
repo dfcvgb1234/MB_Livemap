@@ -71,6 +71,21 @@ export function calendarKey(fruitType: string | null | undefined): string | null
 
 export const MONTHS = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
 
+export const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+];
+
 const FRUIT_COLORS: Record<string, string> = {
   wheat: "#ceab4f",
   barley: "#897246",

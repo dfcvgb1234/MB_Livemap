@@ -21,6 +21,32 @@ export type Vehicle = {
   adSecondDestination?: string | null;
   adMode?: AutoDriveMode | null;
   adFillTypes?: AutoDriveFillType[];
+  /** Present when the vehicle has a Courseplay specialization. */
+  cpCapable?: boolean;
+  cpActive?: boolean;
+  cpCourse?: string | null;
+  /** Owner farm. Sent on a hosted multiplayer server. */
+  farmId?: number;
+  farmName?: string;
+};
+
+export type FarmInfo = {
+  id: number;
+  name: string;
+  color?: string | null;
+  /** Farm account. Money in FS is per farm, shared by its players. */
+  balance?: number | null;
+  loan?: number | null;
+  equity?: number | null;
+};
+
+export type MapPlayer = {
+  id: string;
+  name: string;
+  x: number;
+  z: number;
+  heading: number;
+  farmId?: number;
 };
 
 export type WeatherPoint = {
@@ -40,6 +66,14 @@ export type Weather = {
   daily: WeatherPoint[] | null;
 };
 
+export type FieldPrecision = {
+  soilType: string | null;
+  ph: number | null;
+  phStatus: string | null;
+  nitrogen: number | null;
+  nitrogenTarget: number | null;
+};
+
 export type Field = {
   id: string;
   name?: string | null;
@@ -51,17 +85,58 @@ export type Field = {
   x: number | null;
   z: number | null;
   polygon: Array<{ x: number; z: number }> | null;
+  areaHa?: number | null;
+  cropState?: string | null;
+  needsRolling?: boolean | null;
+  needsFertilizer?: boolean | null;
+  fertilizerLevel?: number | null;
+  fertilizerMax?: number | null;
+  needsSpraying?: boolean | null;
+  weeds?: string | null;
+  needsPlowing?: boolean | null;
+  needsLime?: boolean | null;
+  needsStones?: boolean | null;
+  precisionFarming?: FieldPrecision | null;
 };
+
+/** Crop, care, and Precision Farming read at one world position. */
+export type FieldPointSample = Pick<
+  Field,
+  | "fruitType"
+  | "growthState"
+  | "growthMax"
+  | "cropState"
+  | "needsRolling"
+  | "needsFertilizer"
+  | "fertilizerLevel"
+  | "fertilizerMax"
+  | "needsSpraying"
+  | "weeds"
+  | "needsPlowing"
+  | "needsLime"
+  | "needsStones"
+  | "precisionFarming"
+>;
+
+export type FillUsage = "food" | "water" | "straw" | "product";
 
 export type ProductionFill = {
   name: string;
   fillLevel: number | null;
   capacity: number | null;
+  /** Internal Giants fill type, such as SEEDS or LIQUIDMANURE. */
+  fillType?: string;
+  /** Animal pens mark food and water as input, and milk, manure, and pallets as output. */
+  role?: "input" | "output";
+  /** Animal pens: which tank this is, so alerts stay correct in any language. */
+  usage?: FillUsage;
 };
 
 export type ProductionLine = {
   name: string;
   status: string | null;
+  /** False when the player has switched this recipe off. */
+  enabled?: boolean;
 };
 
 export type Production = {
@@ -93,13 +168,35 @@ export type AnimalHusbandry = {
   z: number | null;
 };
 
+export type GameCalendar = {
+  /** Calendar month: 1 = January … 12 = December. */
+  period: number;
+  /** Day within that month, starting at 1. */
+  day: number;
+  daysPerPeriod: number;
+};
+
 export type GameState = {
   type: "state";
   ts: number;
   source: "mod" | "mock";
   mapName: string | null;
   mapSize: number | null;
+  /** Mod environment name. Empty for the base-game maps. */
+  customEnvironment: string | null;
+  /** `g_currentMission.baseDirectory`. A `$pdlc` path is not a file on disk. */
+  mapDirectory: string | null;
+  /** `missionInfo.baseDirectory`, when the game reports one. */
+  missionDirectory: string | null;
+  /** In-game date. Null until the mod sends one. */
+  calendar: GameCalendar | null;
   vehicles: Vehicle[];
+  /** True on a hosted multiplayer server. Omitted in singleplayer. */
+  multiplayer?: boolean;
+  /** Farm the host is playing. */
+  localFarmId?: number | null;
+  farms?: FarmInfo[];
+  players?: MapPlayer[];
   weather: Weather;
   fields: Field[];
   productions: Production[];
@@ -118,7 +215,25 @@ export type AutoDriveFillType = {
   name: string;
 };
 
-export type AutoDriveMode = "drive" | "pickup" | "deliver" | "load" | "unload";
+export type AutoDriveMode = "drive" | "pickup" | "deliver" | "load" | "unload" | "fieldwork";
+
+export type CourseplayStart = "first" | "nearest" | "last";
+
+export type CourseplayCourse = {
+  /** Full path of the saved course. This is the id used to start it. */
+  id: string;
+  name: string;
+  folder: string;
+  /** Vehicles this course was generated for, from 1 to 5. */
+  vehicles?: number;
+};
+
+export type CourseplayCourses = {
+  type: "courseplay";
+  available: boolean;
+  revision?: number;
+  courses?: CourseplayCourse[];
+};
 
 export type AutoDriveMarker = {
   /** AutoDrive marker index. This is the destination id used to start a drive. */
@@ -142,17 +257,28 @@ export type WhitelistAction =
   | "attach"
   | "detach"
   | "autodrive.start"
-  | "autodrive.stop";
+  | "autodrive.stop"
+  | "courseplay.start"
+  | "courseplay.stop"
+  | "field.scan"
+  | "field.sample";
 
 export type CommandMessage = {
   type: "command";
   id: string;
   action: WhitelistAction;
   vehicleId: string;
+  /** World position for field.scan and field.sample. */
+  x?: number;
+  z?: number;
   targetId?: string;
   mode?: AutoDriveMode;
   secondTargetId?: string;
   fillType?: string;
+  /** Courseplay start point. Defaults to the first waypoint. */
+  cpStart?: CourseplayStart;
+  /** Courseplay lane. Negative is left, positive is right, 0 is the middle. */
+  cpLane?: number;
 };
 
 export type CommandResult = {
@@ -160,9 +286,11 @@ export type CommandResult = {
   id: string;
   ok: boolean;
   error?: string;
+  /** Present on a successful field.sample. */
+  field?: FieldPointSample;
 };
 
-export type NotificationKind = "arrived" | "stuck" | "problem" | "info";
+export type NotificationKind = "arrived" | "stuck" | "problem" | "info" | "finished";
 
 export type NotificationLevel = "info" | "warn" | "error";
 
@@ -193,6 +321,7 @@ export type StatusMessage = {
 export type BridgeToWeb =
   | GameState
   | AutoDriveGraph
+  | CourseplayCourses
   | CommandResult
   | StatusMessage
   | LivemapNotification
@@ -205,6 +334,10 @@ export const WHITELIST: ReadonlySet<string> = new Set([
   "detach",
   "autodrive.start",
   "autodrive.stop",
+  "courseplay.start",
+  "courseplay.stop",
+  "field.scan",
+  "field.sample",
 ]);
 
 export function emptyState(source: "mod" | "mock" = "mock"): GameState {
@@ -214,6 +347,10 @@ export function emptyState(source: "mod" | "mock" = "mock"): GameState {
     source,
     mapName: null,
     mapSize: 2048,
+    customEnvironment: null,
+    mapDirectory: null,
+    missionDirectory: null,
+    calendar: null,
     vehicles: [],
     weather: { condition: null, temperatureC: null, hourly: null, daily: null },
     fields: [],

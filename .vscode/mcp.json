@@ -8,6 +8,14 @@
         "mcp"
       ]
     },
+    "mb-livemap": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/server/node_modules/tsx/dist/cli.mjs",
+        "${workspaceFolder}/server/src/mcp.ts"
+      ]
+    },
     "appmap-gold-traces": {
       "type": "stdio",
       "command": "${userHome}/.appmap/bin/appmap",

@@ -5,14 +5,15 @@ import { usePathname, useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { useLivemapContext } from "@/components/livemap-provider";
 import { useSettings } from "@/components/settings-provider";
-import { useFillAlerts, useProductionAlerts } from "@/hooks/use-fill-alerts";
+import { useAnimalAlerts, useEmptyAlerts, useFillAlerts, useProductionAlerts } from "@/hooks/use-fill-alerts";
 import {
   loadHistory,
   prependHistory,
   saveHistory,
   type HistoryEntry,
 } from "@/lib/notification-history";
-import { channelEnabled, staysUntilDismissed, type ToastItem } from "@/lib/notifications";
+import { armNotificationAudio, playNotificationSound } from "@/lib/notification-sounds";
+import { channelEnabled, resolveNotificationSound, staysUntilDismissed, type ToastItem } from "@/lib/notifications";
 import type { LivemapNotification } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +31,7 @@ const NotificationContext = createContext<NotificationContextValue | null>(null)
 function adChannel(note: LivemapNotification): ToastItem["channel"] {
   if (note.kind === "arrived") return "adArrived";
   if (note.kind === "stuck") return "adStuck";
+  if (note.kind === "finished") return "cpFinished";
   return "adProblem";
 }
 
@@ -56,6 +58,10 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   settingsRef.current = settings;
   readyRef.current = ready;
   toastsRef.current = toasts;
+
+  useEffect(() => {
+    armNotificationAudio();
+  }, []);
 
   useEffect(() => {
     const stored = loadHistory();
@@ -113,6 +119,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
       if (now - last < 4000) return;
       recent.current.set(key, now);
       remember(toast);
+      playNotificationSound(resolveNotificationSound(toast.channel, settingsRef.current.notifications));
       setToasts((current) => [...current.filter((item) => item.id !== toast.id), toast]);
       if (!staysUntilDismissed(toast.channel, settingsRef.current.notifications)) {
         scheduleDismiss(toast.id);
@@ -122,7 +129,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   );
 
   useFillAlerts(push);
+  useEmptyAlerts(push);
   useProductionAlerts(push);
+  useAnimalAlerts(push);
 
   useEffect(() => {
     return subscribeNotifications((note) => {
