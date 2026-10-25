@@ -70,12 +70,14 @@ const TOKEN = process.env.MB_LIVEMAP_TOKEN ?? "";
 const STATIC_ROOT = staticRootFromEnv();
 const DESKTOP = STATIC_ROOT !== "";
 const WEB_PORT = Number(process.env.MB_LIVEMAP_PORT ?? 43127);
+const PUBLIC_PORT = Number(process.env.MB_LIVEMAP_PUBLIC_PORT ?? WEB_PORT);
+const BIND_HOST = process.env.MB_LIVEMAP_BIND || "0.0.0.0";
 // The HTTP MCP handler reads state through the local bridge client. Always use this process.
-process.env.MB_LIVEMAP_HTTP = `http://127.0.0.1:${DESKTOP ? WEB_PORT : HTTP_PORT}`;
-const modInstall = installBundledMod(SETTINGS_DIR);
+// The packaged program publishes 43127 from MB Livemap.exe, which forwards to this process.
+process.env.MB_LIVEMAP_HTTP = `http://127.0.0.1:${DESKTOP ? PUBLIC_PORT : HTTP_PORT}`;
+installBundledMod();
 const overlay = createMapOverlay(SETTINGS_DIR);
 const settingsStore = createSettingsStore(SETTINGS_DIR);
-if (modInstall.message) console.log(`[mod] ${modInstall.message}`);
 const MOCK =
   process.env.MB_LIVEMAP_MOCK === "1" ||
   process.env.MB_LIVEMAP_MOCK === "true" ||
@@ -1029,8 +1031,8 @@ tcpServer.on("error", (err) => {
   console.warn("[tcp] server error:", err.message);
 });
 
-tcpServer.listen(TCP_PORT, "0.0.0.0", () => {
-  console.log(`[tcp] listening on 0.0.0.0:${TCP_PORT}`);
+tcpServer.listen(TCP_PORT, BIND_HOST, () => {
+  console.log(`[tcp] listening on ${BIND_HOST}:${TCP_PORT}`);
 });
 
 // FS25 cannot load LuaSocket. The mod writes JSON lines to this pipe instead.
@@ -1147,7 +1149,7 @@ app.get("/health", (c) =>
     ok: true,
     tcpPort: TCP_PORT,
     pipe: process.platform === "win32" ? PIPE_PATH : null,
-    wsPort: DESKTOP ? WEB_PORT : WS_PORT,
+    wsPort: DESKTOP ? PUBLIC_PORT : WS_PORT,
     modConnected: modSocket !== null && !modSocket.destroyed,
     mockActive,
     lastStateTs,
@@ -1260,7 +1262,7 @@ app.delete("/api/map-overlay", async (c) => {
 });
 
 app.get("/api/connect", async (c) => {
-  const port = DESKTOP ? WEB_PORT : 43127;
+  const port = DESKTOP ? PUBLIC_PORT : 43127;
   const links = await Promise.all(
     lanAddresses().map(async (ip) => {
       const url = `http://${ip}:${port}/`;
@@ -1272,7 +1274,7 @@ app.get("/api/connect", async (c) => {
       return { url, qr };
     }),
   );
-  return c.json({ links, mod: modInstall });
+  return c.json({ links });
 });
 
 if (!DESKTOP || MOCK) {
@@ -1298,6 +1300,8 @@ if (!DESKTOP || MOCK) {
 if (DESKTOP) {
   startDesktopHost({
     port: WEB_PORT,
+    host: BIND_HOST,
+    proxyProtocol: process.env.MB_LIVEMAP_PROXY_PROTOCOL === "1",
     staticRoot: STATIC_ROOT,
     fetch: app.fetch,
     attach: attachWebClients,
@@ -1322,6 +1326,6 @@ if (MOCK) {
 
 console.log(
   DESKTOP
-    ? `[bridge] ready — desktop http://0.0.0.0:${WEB_PORT} · MCP http://127.0.0.1:${WEB_PORT}/mcp · PIPE ${PIPE_PATH}${MOCK ? " · MOCK" : ""}`
+    ? `[bridge] ready — desktop http://${BIND_HOST}:${WEB_PORT} · public ${PUBLIC_PORT} · MCP http://127.0.0.1:${PUBLIC_PORT}/mcp · PIPE ${PIPE_PATH}${MOCK ? " · MOCK" : ""}`
     : `[bridge] ready — TCP ${TCP_PORT} · PIPE ${PIPE_PATH} · WS ${WS_PORT} · HTTP ${HTTP_PORT} · MCP http://127.0.0.1:${HTTP_PORT}/mcp${MOCK ? " · MOCK" : ""}`,
 );

@@ -4,7 +4,10 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Net;
+using System.Net.Sockets;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading;
 using System.Windows.Forms;
 
@@ -63,6 +66,7 @@ namespace MBLivemap
         readonly Button openButton;
         readonly NotifyIcon tray;
         readonly System.Windows.Forms.Timer poll;
+        readonly LanProxy proxy = new LanProxy();
         Process worker;
         int pid;
         volatile bool closed;
@@ -96,7 +100,7 @@ namespace MBLivemap
             statusLabel.Location = new Point(24, 54);
 
             detailLabel = new Label();
-            detailLabel.Text = "Windows may ask permission so a tablet can connect.";
+            detailLabel.Text = "Windows Firewall may ask to allow MB Livemap when a tablet connects. Click Allow access.";
             detailLabel.Location = new Point(24, 86);
             detailLabel.Size = new Size(392, 44);
 
@@ -140,6 +144,19 @@ namespace MBLivemap
 
             Shown += delegate
             {
+                try
+                {
+                    proxy.Start();
+                }
+                catch (SocketException ex)
+                {
+                    if (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+                        Fail("Port 43127 is already in use. Close the other MB Livemap, then start this one again.");
+                    else
+                        Fail("MB Livemap could not open the network port.\r\n" + ex.Message);
+                    return;
+                }
+
                 Thread workerThread = new Thread(RunLaunch);
                 workerThread.IsBackground = true;
                 workerThread.Start();
@@ -183,6 +200,7 @@ namespace MBLivemap
             start.WorkingDirectory = folder;
             start.UseShellExecute = false;
             start.CreateNoWindow = true;
+            start.EnvironmentVariables["MB_LIVEMAP_LAN_PROXY"] = "1";
 
             try
             {
@@ -387,6 +405,7 @@ namespace MBLivemap
         {
             closed = true;
             poll.Stop();
+            proxy.Stop();
             if (!stopping)
             {
                 stopping = true;
@@ -514,5 +533,107 @@ namespace MBLivemap
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]
         static extern bool DestroyIcon(IntPtr handle);
+    }
+
+    // Listens on the LAN port so Windows Firewall asks about MB Livemap.exe.
+    // The bridge stays on localhost. The first line tells it the tablet's address.
+    sealed class LanProxy
+    {
+        const int PublicPort = 43127;
+        const int BridgePort = 43126;
+        TcpListener listener;
+        volatile bool stopped;
+
+        public void Start()
+        {
+            listener = new TcpListener(IPAddress.Any, PublicPort);
+            listener.Start();
+            Thread thread = new Thread(AcceptLoop);
+            thread.IsBackground = true;
+            thread.Start();
+        }
+
+        public void Stop()
+        {
+            stopped = true;
+            try
+            {
+                if (listener != null)
+                    listener.Stop();
+            }
+            catch (Exception)
+            {
+            }
+        }
+
+        void AcceptLoop()
+        {
+            while (!stopped)
+            {
+                TcpClient inbound;
+                try
+                {
+                    inbound = listener.AcceptTcpClient();
+                }
+                catch (SocketException)
+                {
+                    if (stopped)
+                        return;
+                    Thread.Sleep(200);
+                    continue;
+                }
+                Queue(inbound);
+            }
+        }
+
+        void Queue(TcpClient inbound)
+        {
+            ThreadPool.QueueUserWorkItem(delegate { Bridge(inbound); });
+        }
+
+        void Bridge(TcpClient inbound)
+        {
+            TcpClient outbound = new TcpClient();
+            try
+            {
+                IPEndPoint remote = inbound.Client.RemoteEndPoint as IPEndPoint;
+                IPEndPoint local = inbound.Client.LocalEndPoint as IPEndPoint;
+                if (remote == null || local == null)
+                    return;
+                inbound.NoDelay = true;
+                outbound.NoDelay = true;
+                outbound.Connect(IPAddress.Loopback, BridgePort);
+                string header = "PROXY TCP4 " + remote.Address + " " + local.Address + " " + remote.Port + " " + local.Port + "\r\n";
+                NetworkStream fromLan = inbound.GetStream();
+                NetworkStream toBridge = outbound.GetStream();
+                byte[] prefix = Encoding.ASCII.GetBytes(header);
+                toBridge.Write(prefix, 0, prefix.Length);
+                ThreadPool.QueueUserWorkItem(delegate { Pump(toBridge, fromLan); });
+                Pump(fromLan, toBridge);
+            }
+            catch (Exception)
+            {
+            }
+            finally
+            {
+                try { inbound.Close(); } catch (Exception) { }
+                try { outbound.Close(); } catch (Exception) { }
+            }
+        }
+
+        static void Pump(NetworkStream source, NetworkStream destination)
+        {
+            byte[] buffer = new byte[16384];
+            try
+            {
+                int read;
+                while ((read = source.Read(buffer, 0, buffer.Length)) > 0)
+                    destination.Write(buffer, 0, read);
+            }
+            catch (Exception)
+            {
+            }
+            try { destination.Close(); } catch (Exception) { }
+        }
     }
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Bell, Settings } from "lucide-react";
-import { ConnectButton, ConnectProvider, ConnectSheet, ModBanner } from "@/components/connect-sheet";
+import { ConnectButton, ConnectProvider, ConnectSheet } from "@/components/connect-sheet";
 import { LivemapProvider, useLivemapContext } from "@/components/livemap-provider";
 import { MapOverlayPrompt } from "@/components/map-overlay-prompt";
 import { NotificationHistorySheet } from "@/components/notification-history-sheet";
@@ -33,7 +33,6 @@ function ShellInner({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex h-svh flex-col bg-[radial-gradient(circle_at_top_left,rgba(226,182,87,0.08),transparent_28%),#17140f] text-[#f3efe4]">
-      <ModBanner />
       <header className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 px-[18px] py-3.5">
         <div className="flex min-w-0 items-center gap-3">
           <span className="grid size-[42px] shrink-0 place-items-center rounded-lg bg-[#e2b657] text-base font-bold text-[#2a2112]">

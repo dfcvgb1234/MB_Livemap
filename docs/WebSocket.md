@@ -13,7 +13,7 @@ This page is the contract for that socket. [How it works](How-it-works.md) expla
 
 On the computer that runs the game, `<computer>` is `127.0.0.1`. From a phone on the same Wi-Fi, use that computer's Wi-Fi address. The socket is open on the LAN. By default any client that can reach the port can read the farm and send commands. Set `MB_LIVEMAP_TOKEN` on the bridge to require a token: pass it as `?token=` on the WebSocket URL, or as the header `x-mb-livemap-token`. A wrong token gets `{ "type": "error", "message": "Unauthorized" }` and the socket closes with code 1008.
 
-The packaged program's firewall rule allows port 43127 on private networks. A development bridge uses 43127 for the bundled page and 18766 for this socket.
+The first time a phone or tablet connects to the packaged program, Windows Firewall asks to allow MB Livemap. That question appears on a private network and does not run the program as administrator. A development bridge uses 43127 for the bundled page and 18766 for this socket.
 
 ## When you connect
 

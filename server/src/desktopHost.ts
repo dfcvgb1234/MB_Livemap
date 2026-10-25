@@ -1,6 +1,6 @@
-import { appendFileSync, copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { createServer } from "node:http";
+import { appendFileSync, copyFileSync, createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
+import { createServer as createHttpServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
+import { createServer as createTcpServer, type Socket } from "node:net";
 import { homedir, networkInterfaces } from "node:os";
 import path from "node:path";
 import { getRequestListener } from "@hono/node-server";
@@ -59,66 +59,19 @@ export function enableLogFile(file: string) {
   console.error = wrap(console.error.bind(console));
 }
 
-export type ModInstallState = {
-  status: "current" | "installed" | "updated" | "missing-game" | "copy-failed" | "skipped";
-  message: string;
-};
-
 /** Copy the bundled mod zip into the FS25 mods folder when this build includes one. */
-export function installBundledMod(settingsDir: string): ModInstallState {
+export function installBundledMod() {
   const zip = process.env.MB_LIVEMAP_MOD_ZIP ?? "";
-  const version = (process.env.MB_LIVEMAP_VERSION ?? "").trim();
-  if (!zip || !version) return { status: "skipped", message: "" };
-  if (!existsSync(zip)) {
-    return {
-      status: "copy-failed",
-      message: "The mod package is missing from the MB Livemap folder. Download it again.",
-    };
-  }
+  if (!zip || !existsSync(zip)) return;
 
   const modsDir = path.join(homedir(), "Documents", "My Games", "FarmingSimulator2025", "mods");
-  if (!existsSync(modsDir)) {
-    return {
-      status: "missing-game",
-      message:
-        "The Farming Simulator 2025 mods folder was not found. Install the game, then start MB Livemap again.",
-    };
-  }
-
-  const dest = path.join(modsDir, "FS25_MB_Livemap.zip");
-  const versionFile = path.join(settingsDir, "installed-version.txt");
-  let previous = "";
-  try {
-    previous = readFileSync(versionFile, "utf8").trim();
-  } catch {
-    previous = "";
-  }
-  const hadZip = existsSync(dest);
-  if (previous === version && hadZip) return { status: "current", message: "" };
+  if (!existsSync(modsDir)) return;
 
   try {
-    mkdirSync(settingsDir, { recursive: true });
-    copyFileSync(zip, dest);
-    writeFileSync(versionFile, version);
+    copyFileSync(zip, path.join(modsDir, "FS25_MB_Livemap.zip"));
   } catch (err) {
     console.warn("[mod] copy failed:", err instanceof Error ? err.message : err);
-    return {
-      status: "copy-failed",
-      message: "The mod could not be copied. Close Farming Simulator, then start MB Livemap again.",
-    };
   }
-
-  if (hadZip || previous !== "") {
-    return {
-      status: "updated",
-      message: "A newer mod was copied into Farming Simulator. Restart the game, then load your save.",
-    };
-  }
-  return {
-    status: "installed",
-    message:
-      "MB Livemap Bridge was added to your mods folder. In the game, enable that mod, then load your save.",
-  };
 }
 
 function flightFile(rel: string): string | null {
@@ -209,14 +162,51 @@ function rewriteMcpUrl(url: string): string | null {
   return `${bare}${query}`;
 }
 
+/** The Windows program sends this line, then the tablet's real bytes. */
+function acceptProxied(socket: Socket, httpServer: HttpServer) {
+  let buffer = Buffer.alloc(0);
+  const onData = (chunk: Buffer) => {
+    buffer = Buffer.concat([buffer, chunk]);
+    const newline = buffer.indexOf("\r\n");
+    if (newline < 0) {
+      if (buffer.length > 107) socket.destroy();
+      return;
+    }
+    const line = buffer.subarray(0, newline).toString("ascii");
+    const rest = buffer.subarray(newline + 2);
+    const parts = line.split(" ");
+    const clientIp = parts[2] ?? "";
+    if (parts[0] !== "PROXY" || parts[1] !== "TCP4" || !/^(\d{1,3}\.){3}\d{1,3}$/.test(clientIp)) {
+      socket.destroy();
+      return;
+    }
+    Object.defineProperty(socket, "remoteAddress", {
+      configurable: true,
+      get: () => clientIp,
+    });
+    socket.pause();
+    socket.off("data", onData);
+    if (rest.length > 0) socket.unshift(rest);
+    httpServer.emit("connection", socket);
+    socket.resume();
+  };
+  socket.on("data", onData);
+  socket.on("error", () => {
+    socket.destroy();
+  });
+}
+
 export function startDesktopHost(options: {
   port: number;
+  host?: string;
+  proxyProtocol?: boolean;
   staticRoot: string;
   fetch: Parameters<typeof getRequestListener>[0];
   attach: (wss: WebSocketServer) => void;
 }) {
+  const host = options.host || "0.0.0.0";
   const listener = getRequestListener(options.fetch);
-  const server = createServer((req, res) => {
+  const server = createHttpServer((req, res) => {
     const mcpUrl = rewriteMcpUrl(req.url ?? "/");
     if (mcpUrl) req.url = mcpUrl;
     const { path: requestPath, query } = splitUrl(req.url ?? "/");
@@ -260,9 +250,16 @@ export function startDesktopHost(options: {
   };
   server.on("error", fail);
   wss.on("error", fail);
-  server.listen(options.port, "0.0.0.0", () => {
-    console.log(`[web] http://0.0.0.0:${options.port}`);
-  });
+  const onListening = () => {
+    console.log(`[web] http://${host}:${options.port}`);
+  };
+  if (options.proxyProtocol) {
+    const gate = createTcpServer((socket) => acceptProxied(socket, server));
+    gate.on("error", fail);
+    gate.listen(options.port, host, onListening);
+    return;
+  }
+  server.listen(options.port, host, onListening);
 }
 
 export function staticRootFromEnv(): string {
