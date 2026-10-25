@@ -8,6 +8,9 @@ The page shows your vehicles, fields, weather, productions, and animals. From a 
 
 You need Windows and Farming Simulator 25.
 
+You can download the latest version from here:
+[Latest version](https://github.com/dfcvgb1234/MB_Livemap/releases).
+
 1. Run **MB-Livemap-Setup.exe**.
 2. When it finishes, leave **Start MB Livemap** ticked. A small window opens and stays open, and the farm page opens in your browser. An icon also sits by the clock. Double-click that icon to bring the window back after you minimize it.
 3. If Windows asks for permission, click **Yes**. That lets a phone or tablet on your Wi-Fi open the page.
