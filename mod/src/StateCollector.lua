@@ -1735,6 +1735,10 @@ function StateCollector.new()
     self.missionDirectory = nil
     -- Farm ids the dashboard asked to include. Nil means the host farm only.
     self.enabledFarmIds = nil
+    self.boundaryRings = {}
+    self.boundaryStore = {}
+    self.boundaryStoreLoaded = false
+    self.boundaryKeyLoaded = nil
     return self
 end
 
@@ -3257,6 +3261,367 @@ function StateCollector:samplePrecisionFarming(x, z, fruitIndex)
     return info
 end
 
+local function pointInPolygon(x, z, points)
+    if type(points) ~= "table" or #points < 3 then
+        return false
+    end
+    local inside = false
+    local count = #points
+    local previous = count
+    for index = 1, count do
+        local current = points[index]
+        local prior = points[previous]
+        if type(current) == "table" and type(prior) == "table" and (current.z > z) ~= (prior.z > z) then
+            local span = prior.z - current.z
+            if span ~= 0 then
+                local cross = (prior.x - current.x) * (z - current.z) / span + current.x
+                if x < cross then
+                    inside = not inside
+                end
+            end
+        end
+        previous = index
+    end
+    return inside
+end
+
+local function polygonCentroid(points)
+    local x, z = 0, 0
+    for _, point in ipairs(points) do
+        x = x + point.x
+        z = z + point.z
+    end
+    return x / #points, z / #points
+end
+
+local function fieldCacheKey(field, id)
+    return tostring((type(field) == "table" and (field.fieldId or field.rootNode)) or id)
+end
+
+local function xmlEscape(value)
+    local text = tostring(value)
+    text = text:gsub("&", "&amp;")
+    text = text:gsub("<", "&lt;")
+    text = text:gsub(">", "&gt;")
+    text = text:gsub('"', "&quot;")
+    return text
+end
+
+local function ringIds(ring)
+    local ids = {}
+    if type(ring.owner) == "string" then
+        ids[ring.owner] = true
+    end
+    if type(ring.synthetic) == "string" then
+        ids[ring.synthetic] = true
+    end
+    if type(ring.hidden) == "table" then
+        for _, id in ipairs(ring.hidden) do
+            ids[id] = true
+        end
+    end
+    return ids
+end
+
+local function ringsOverlap(old, newRing, newPoints)
+    local oldIds = ringIds(old)
+    for id in pairs(ringIds(newRing)) do
+        if oldIds[id] then
+            return true
+        end
+    end
+    if type(old.cx) == "number" and type(old.cz) == "number" and pointInPolygon(old.cx, old.cz, newPoints) then
+        return true
+    end
+    if type(newRing.cx) == "number" and type(newRing.cz) == "number" and type(old.points) == "table" and pointInPolygon(newRing.cx, newRing.cz, old.points) then
+        return true
+    end
+    return false
+end
+
+function StateCollector:boundariesFile()
+    if getUserProfileAppPath == nil then
+        return nil
+    end
+    local ok, base = pcall(getUserProfileAppPath)
+    if not ok or type(base) ~= "string" or base == "" then
+        return nil
+    end
+    local tail = string.sub(base, -1)
+    if tail ~= "/" and tail ~= "\\" then
+        base = base .. "/"
+    end
+    local modName = g_currentModName or "FS25_MB_Livemap"
+    local dir = base .. "modSettings/" .. modName .. "/"
+    pcall(createFolder, base .. "modSettings/")
+    pcall(createFolder, dir)
+    return dir .. "fieldBoundaries.xml"
+end
+
+function StateCollector:boundaryKey()
+    local mapName = ""
+    local saveName = ""
+    local info = g_currentMission and g_currentMission.missionInfo
+    if type(info) == "table" then
+        if type(info.mapTitle) == "string" and info.mapTitle ~= "" then
+            mapName = info.mapTitle
+        elseif type(info.mapId) == "string" then
+            mapName = info.mapId
+        end
+        if type(info.savegameDirectory) == "string" and info.savegameDirectory ~= "" then
+            saveName = info.savegameDirectory
+        elseif info.savegameIndex ~= nil then
+            saveName = tostring(info.savegameIndex)
+        end
+    end
+    if mapName == "" and type(self.mapName) == "string" then
+        mapName = self.mapName
+    end
+    if saveName == "" and type(self.missionDirectory) == "string" then
+        saveName = self.missionDirectory
+    end
+    return mapName .. "|" .. saveName
+end
+
+function StateCollector:readBoundaryStore()
+    local store = {}
+    local path = self:boundariesFile()
+    if path == nil or XMLFile == nil or XMLFile.loadIfExists == nil then
+        return store
+    end
+    local xmlFile = nil
+    local loaded = pcall(function()
+        xmlFile = XMLFile.loadIfExists("mbLivemapBoundaries", path)
+    end)
+    if not loaded or xmlFile == nil then
+        return store
+    end
+    pcall(function()
+        xmlFile:iterate("fieldBoundaries.save", function(_, saveKey)
+            local key = xmlFile:getString(saveKey .. "#key")
+            if type(key) ~= "string" or key == "" then
+                return
+            end
+            local rings = {}
+            xmlFile:iterate(saveKey .. ".ring", function(_, ringKey)
+                local points = {}
+                xmlFile:iterate(ringKey .. ".point", function(_, pointKey)
+                    local x = xmlFile:getFloat(pointKey .. "#x")
+                    local z = xmlFile:getFloat(pointKey .. "#z")
+                    if type(x) == "number" and type(z) == "number" then
+                        points[#points + 1] = { x = x, z = z }
+                    end
+                end)
+                if #points < 3 then
+                    return
+                end
+                local hidden = {}
+                xmlFile:iterate(ringKey .. ".hidden", function(_, hiddenKey)
+                    local id = xmlFile:getString(hiddenKey .. "#id")
+                    if type(id) == "string" and id ~= "" then
+                        hidden[#hidden + 1] = id
+                    end
+                end)
+                local ring = { points = points, hidden = hidden }
+                local owner = xmlFile:getString(ringKey .. "#owner")
+                local synthetic = xmlFile:getString(ringKey .. "#synthetic")
+                if type(owner) == "string" and owner ~= "" then
+                    ring.owner = owner
+                elseif type(synthetic) == "string" and synthetic ~= "" then
+                    ring.synthetic = synthetic
+                    ring.cx = xmlFile:getFloat(ringKey .. "#cx")
+                    ring.cz = xmlFile:getFloat(ringKey .. "#cz")
+                    if type(ring.cx) ~= "number" or type(ring.cz) ~= "number" then
+                        ring.cx, ring.cz = polygonCentroid(points)
+                    end
+                end
+                if ring.owner ~= nil or ring.synthetic ~= nil then
+                    rings[#rings + 1] = ring
+                end
+            end)
+            store[key] = rings
+        end)
+    end)
+    pcall(function()
+        xmlFile:delete()
+    end)
+    return store
+end
+
+function StateCollector:writeBoundaryStore()
+    local path = self:boundariesFile()
+    if path == nil or type(io) ~= "table" or type(io.open) ~= "function" then
+        return
+    end
+    local lines = {
+        '<?xml version="1.0" encoding="utf-8" standalone="no"?>',
+        "<fieldBoundaries>",
+    }
+    for key, rings in pairs(self.boundaryStore or {}) do
+        lines[#lines + 1] = string.format('    <save key="%s">', xmlEscape(key))
+        for _, ring in ipairs(rings) do
+            if ring.owner ~= nil then
+                lines[#lines + 1] = string.format('        <ring owner="%s">', xmlEscape(ring.owner))
+            else
+                lines[#lines + 1] = string.format(
+                    '        <ring synthetic="%s" cx="%.1f" cz="%.1f">',
+                    xmlEscape(ring.synthetic),
+                    ring.cx or 0,
+                    ring.cz or 0
+                )
+            end
+            for _, id in ipairs(ring.hidden or {}) do
+                lines[#lines + 1] = string.format('            <hidden id="%s"/>', xmlEscape(id))
+            end
+            for _, point in ipairs(ring.points or {}) do
+                lines[#lines + 1] = string.format('            <point x="%.1f" z="%.1f"/>', point.x, point.z)
+            end
+            lines[#lines + 1] = "        </ring>"
+        end
+        lines[#lines + 1] = "    </save>"
+    end
+    lines[#lines + 1] = "</fieldBoundaries>"
+    lines[#lines + 1] = ""
+    local handle = io.open(path, "w")
+    if handle == nil then
+        return
+    end
+    handle:write(table.concat(lines, "\n"))
+    handle:close()
+end
+
+function StateCollector:ensureBoundaries()
+    if not self.boundaryStoreLoaded then
+        self.boundaryStore = self:readBoundaryStore()
+        self.boundaryStoreLoaded = true
+    end
+    local key = self:boundaryKey()
+    if self.boundaryKeyLoaded ~= key then
+        self.boundaryKeyLoaded = key
+        self.boundaryRings = self.boundaryStore[key] or {}
+        self.boundaryStore[key] = self.boundaryRings
+    end
+end
+
+function StateCollector:boundaryLookups()
+    local polygons = {}
+    local hidden = {}
+    local synthetics = {}
+    for _, ring in ipairs(self.boundaryRings or {}) do
+        if type(ring.owner) == "string" and type(ring.points) == "table" then
+            polygons[ring.owner] = ring.points
+        end
+        for _, id in ipairs(ring.hidden or {}) do
+            hidden[id] = true
+        end
+        if type(ring.synthetic) == "string" then
+            synthetics[#synthetics + 1] = ring
+        end
+    end
+    return polygons, hidden, synthetics
+end
+
+function StateCollector:fieldCenters()
+    local centers = {}
+    local fieldList = nil
+    if g_fieldManager ~= nil and g_fieldManager.fields ~= nil then
+        fieldList = g_fieldManager.fields
+    elseif g_currentMission ~= nil and g_currentMission.fieldManager ~= nil then
+        fieldList = g_currentMission.fieldManager.fields
+    end
+    if type(fieldList) ~= "table" then
+        return centers
+    end
+    for id, field in pairs(fieldList) do
+        if type(field) == "table" then
+            local fx, fz = nil, nil
+            if field.getCenterOfFieldWorldPosition ~= nil then
+                local a, b = field:getCenterOfFieldWorldPosition()
+                fx, fz = a, b
+            elseif field.getCenterOfFieldWorldPos ~= nil then
+                local a, b = field:getCenterOfFieldWorldPos()
+                fx, fz = a, b
+            elseif field.posX ~= nil then
+                fx, fz = field.posX, field.posZ
+            end
+            if type(fx) == "number" and type(fz) == "number" then
+                centers[#centers + 1] = { id = fieldCacheKey(field, id), x = fx, z = fz }
+            end
+        end
+    end
+    return centers
+end
+
+function StateCollector:commitScan(points, clickX, clickZ, interiorX, interiorZ)
+    if type(points) ~= "table" then
+        return false, "Could not trace the field edge"
+    end
+    self:ensureBoundaries()
+    local simplified = simplifyPolygon(points)
+    if simplified == nil then
+        return false, "Field outline was too small"
+    end
+    local rounded = {}
+    for _, point in ipairs(simplified) do
+        rounded[#rounded + 1] = { x = round1(point.x), z = round1(point.z) }
+    end
+    if #rounded < 3 then
+        return false, "Field outline was too small"
+    end
+    if type(interiorX) == "number" and type(interiorZ) == "number" and not pointInPolygon(interiorX, interiorZ, rounded) then
+        return false, "Could not trace the field edge"
+    end
+
+    local inside = {}
+    for _, field in ipairs(self:fieldCenters()) do
+        if pointInPolygon(field.x, field.z, rounded) then
+            local dx = field.x - (clickX or field.x)
+            local dz = field.z - (clickZ or field.z)
+            inside[#inside + 1] = { id = field.id, dist = dx * dx + dz * dz }
+        end
+    end
+    table.sort(inside, function(a, b)
+        return a.dist < b.dist
+    end)
+
+    local ring
+    if #inside == 0 then
+        local cx, cz = polygonCentroid(rounded)
+        ring = {
+            synthetic = string.format("scan:%d:%d", math.floor(cx + 0.5), math.floor(cz + 0.5)),
+            cx = round1(cx),
+            cz = round1(cz),
+            points = rounded,
+            hidden = {},
+        }
+    else
+        local hidden = {}
+        for index = 2, #inside do
+            hidden[#hidden + 1] = inside[index].id
+        end
+        ring = {
+            owner = inside[1].id,
+            points = rounded,
+            hidden = hidden,
+        }
+    end
+
+    local kept = {}
+    for _, old in ipairs(self.boundaryRings) do
+        if not ringsOverlap(old, ring, rounded) then
+            kept[#kept + 1] = old
+        end
+    end
+    kept[#kept + 1] = ring
+    self.boundaryRings = kept
+    self.boundaryStore[self.boundaryKeyLoaded] = kept
+    self:writeBoundaryStore()
+    if Logging ~= nil and Logging.info ~= nil then
+        Logging.info("[MB Livemap] field scan saved %d points", #rounded)
+    end
+    return true
+end
+
 function StateCollector:collectFields()
     local fields = {}
     safeCall(function()
@@ -3278,6 +3643,8 @@ function StateCollector:collectFields()
         local weedsEnabled = missionFlag({ "weedsEnabled", "weedsRequired" })
         local stonesEnabled = missionFlag({ "stonesEnabled", "stonesRequired" })
         local sprayMax = fertilizerApplicationsMax()
+        self:ensureBoundaries()
+        local scannedPolygons, hiddenScans = self:boundaryLookups()
 
         for id, field in pairs(fieldList) do
             local fruitType = nil
@@ -3299,7 +3666,7 @@ function StateCollector:collectFields()
             local needsLime = nil
             local needsStones = nil
             local precision = nil
-            local cacheKey = tostring((type(field) == "table" and (field.fieldId or field.rootNode)) or id)
+            local cacheKey = fieldCacheKey(field, id)
             local displayId = type(field) == "table" and fieldDisplayId(field, id) or tostring(id)
 
             safeCall(function()
@@ -3460,9 +3827,35 @@ function StateCollector:collectFields()
             if precision ~= nil then
                 entry.precisionFarming = precision
             end
+            if scannedPolygons[cacheKey] ~= nil then
+                entry.polygon = scannedPolygons[cacheKey]
+                local measured = polygonAreaHa(scannedPolygons[cacheKey])
+                if measured ~= nil then
+                    entry.areaHa = measured
+                end
+            elseif hiddenScans[cacheKey] then
+                entry.polygon = nil
+            end
             fields[#fields + 1] = entry
         end
     end, nil)
+
+    self:ensureBoundaries()
+    local _, _, scannedSynthetics = self:boundaryLookups()
+    for _, ring in ipairs(scannedSynthetics) do
+        local fruit, growth, growthMax = sampleFieldFruit(ring.cx, ring.cz)
+        fields[#fields + 1] = {
+            id = ring.synthetic,
+            name = "Custom",
+            fruitType = fruit,
+            growthState = growth,
+            growthMax = growthMax,
+            x = ring.cx,
+            z = ring.cz,
+            polygon = ring.points,
+            areaHa = polygonAreaHa(ring.points),
+        }
+    end
 
     if not self.loggedFieldOutlines and #fields > 0 and Logging ~= nil and Logging.info ~= nil then
         local withPoly = 0

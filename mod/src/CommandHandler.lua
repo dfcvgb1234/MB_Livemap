@@ -12,6 +12,7 @@ local ALLOWED = {
     ["autodrive.stop"] = true,
     ["courseplay.start"] = true,
     ["courseplay.stop"] = true,
+    ["field.scan"] = true,
 }
 
 local FILL_NAME_CANDIDATES = {
@@ -87,8 +88,49 @@ local function findVehicleById(vehicleId)
     return nil
 end
 
-function CommandHandler.new()
-    return setmetatable({}, CommandHandler)
+function CommandHandler.new(bridge)
+    local self = setmetatable({}, CommandHandler)
+    self.bridge = bridge
+    return self
+end
+
+function CommandHandler:startFieldScan(cmd)
+    local id = cmd.id or "unknown"
+    local x = tonumber(cmd.x)
+    local z = tonumber(cmd.z)
+    if x == nil or z == nil then
+        return { type = "commandResult", id = id, ok = false, error = "Missing scan position" }
+    end
+    local bridge = self.bridge
+    if bridge == nil or bridge.scanner == nil or bridge.collector == nil then
+        return { type = "commandResult", id = id, ok = false, error = "Field scan is not available" }
+    end
+    local started, err = bridge.scanner:start(x, z, function(ok, payload)
+        local result
+        if not ok then
+            local message = type(payload) == "string" and payload or "Field scan failed"
+            result = { type = "commandResult", id = id, ok = false, error = message }
+        else
+            local points = type(payload) == "table" and payload.points or nil
+            local interiorX = type(payload) == "table" and payload.interiorX or x
+            local interiorZ = type(payload) == "table" and payload.interiorZ or z
+            local committed, commitErr = bridge.collector:commitScan(points, x, z, interiorX, interiorZ)
+            if not committed then
+                result = { type = "commandResult", id = id, ok = false, error = commitErr or "Field scan failed" }
+            else
+                result = { type = "commandResult", id = id, ok = true }
+                bridge:sendSnapshot({ fields = true })
+            end
+        end
+        if Logging ~= nil and Logging.info ~= nil then
+            Logging.info("[MB Livemap] field scan %s", result.ok and "finished" or tostring(result.error))
+        end
+        bridge.tcp:sendLine(Json.encode(result))
+    end)
+    if not started then
+        return { type = "commandResult", id = id, ok = false, error = err or "A field scan is already running" }
+    end
+    return nil
 end
 
 local function localPlayer()
@@ -248,6 +290,10 @@ function CommandHandler:handle(cmd)
     local action = cmd.action
     if not ALLOWED[action] then
         return { type = "commandResult", id = id, ok = false, error = "Unsupported action: " .. tostring(action) }
+    end
+
+    if action == "field.scan" then
+        return self:startFieldScan(cmd)
     end
 
     local vehicle = findVehicleById(cmd.vehicleId)

@@ -64,7 +64,8 @@ function LivemapBridge.new()
     self.collector = StateCollector.new()
     self.autoDrive = AutoDriveSync.new()
     self.courseplay = CourseplaySync.new()
-    self.commands = CommandHandler.new()
+    self.scanner = FieldBoundaryScanner.new()
+    self.commands = CommandHandler.new(self)
     self.intervals = copyIntervals(NORMAL_INTERVALS)
     self.accum = {}
     for _, group in ipairs(INTERVAL_GROUPS) do
@@ -222,6 +223,9 @@ end
 
 function LivemapBridge:update(dt)
     self.tcp:update()
+    if self.scanner ~= nil then
+        self.scanner:update()
+    end
     self:flushNotifications()
     if CourseplaySync ~= nil and CourseplaySync.updateHandoffs ~= nil then
         CourseplaySync.updateHandoffs()
@@ -303,7 +307,9 @@ function LivemapBridge:onLine(line)
     end
     if msg.type == "command" then
         local result = self.commands:handle(msg)
-        self.tcp:sendLine(Json.encode(result))
+        if result ~= nil then
+            self.tcp:sendLine(Json.encode(result))
+        end
     elseif msg.type == "refreshCourses" then
         self:sendCourseplay(true)
     elseif msg.type == "hello" then

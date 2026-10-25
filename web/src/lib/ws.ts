@@ -42,6 +42,8 @@ export function createCommand(
     fillType?: string;
     cpStart?: CourseplayStart;
     cpLane?: number;
+    x?: number;
+    z?: number;
   },
 ): CommandMessage {
   return {
@@ -58,6 +60,8 @@ export function createCommand(
     ...(extra?.fillType ? { fillType: extra.fillType } : {}),
     ...(extra?.cpStart ? { cpStart: extra.cpStart } : {}),
     ...(extra?.cpLane != null ? { cpLane: extra.cpLane } : {}),
+    ...(extra?.x != null ? { x: extra.x } : {}),
+    ...(extra?.z != null ? { z: extra.z } : {}),
   };
 }
 

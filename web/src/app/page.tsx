@@ -92,6 +92,10 @@ export default function HomePage() {
             setSelectedPlayerId(null);
             setSelectedFieldId(field.id);
           }}
+          onScan={(x, z) =>
+            connection === "connected" ? sendCommand("field.scan", "", undefined, { x, z }) : ""
+          }
+          scanResult={lastResult}
         />
       </MapSlot>
       <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1536px]:overflow-auto min-[1536px]:border-t-0 min-[1536px]:border-l">

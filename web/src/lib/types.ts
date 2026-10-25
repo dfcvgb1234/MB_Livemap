@@ -251,13 +251,17 @@ export type WhitelistAction =
   | "autodrive.start"
   | "autodrive.stop"
   | "courseplay.start"
-  | "courseplay.stop";
+  | "courseplay.stop"
+  | "field.scan";
 
 export type CommandMessage = {
   type: "command";
   id: string;
   action: WhitelistAction;
   vehicleId: string;
+  /** World position for field.scan. */
+  x?: number;
+  z?: number;
   targetId?: string;
   /** AutoDrive job. Defaults to drive when omitted. */
   mode?: AutoDriveMode;

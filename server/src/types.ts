@@ -230,13 +230,17 @@ export type WhitelistAction =
   | "autodrive.start"
   | "autodrive.stop"
   | "courseplay.start"
-  | "courseplay.stop";
+  | "courseplay.stop"
+  | "field.scan";
 
 export type CommandMessage = {
   type: "command";
   id: string;
   action: WhitelistAction;
   vehicleId: string;
+  /** World position for field.scan. */
+  x?: number;
+  z?: number;
   targetId?: string;
   mode?: AutoDriveMode;
   secondTargetId?: string;
@@ -300,6 +304,7 @@ export const WHITELIST: ReadonlySet<string> = new Set([
   "autodrive.stop",
   "courseplay.start",
   "courseplay.stop",
+  "field.scan",
 ]);
 
 export function emptyState(source: "mod" | "mock" = "mock"): GameState {

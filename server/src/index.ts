@@ -26,6 +26,7 @@ import {
   type BridgeToWeb,
   type CommandMessage,
   type CommandResult,
+  type Field,
   type GameState,
   type LivemapNotification,
   type NotificationKind,
@@ -130,6 +131,17 @@ type MockVehiclePatch = {
 };
 
 const mockAdOverrides = new Map<string, MockVehiclePatch>();
+const mockScannedFields = new Map<string, Field>();
+
+function applyMockFields(state: GameState): GameState {
+  if (state.source !== "mock" || mockScannedFields.size === 0) return state;
+  const scanned = [...mockScannedFields.values()];
+  const scannedIds = new Set(scanned.map((field) => field.id));
+  return {
+    ...state,
+    fields: [...state.fields.filter((field) => !scannedIds.has(field.id)), ...scanned],
+  };
+}
 
 function patchMockVehicle(vehicleId: string, patch: MockVehiclePatch) {
   mockAdOverrides.set(vehicleId, { ...mockAdOverrides.get(vehicleId), ...patch });
@@ -147,7 +159,7 @@ function applyMockAd(state: GameState): GameState {
 }
 
 function setState(state: GameState) {
-  latestState = applyMockAd(state);
+  latestState = applyMockFields(applyMockAd(state));
   lastStateTs = state.ts;
   overlay.note(latestState);
   broadcast(latestState);
@@ -363,7 +375,7 @@ function flushPipeCommands() {
   if (!cmd) return;
   const body =
     `<?xml version="1.0" encoding="utf-8" standalone="no"?>\n` +
-    `<commands id="${xmlAttr(cmd.id)}" action="${xmlAttr(cmd.action)}" vehicleId="${xmlAttr(cmd.vehicleId)}" targetId="${xmlAttr(cmd.targetId ?? "")}" mode="${xmlAttr(cmd.mode ?? "")}" secondTargetId="${xmlAttr(cmd.secondTargetId ?? "")}" fillType="${xmlAttr(cmd.fillType ?? "")}" cpStart="${xmlAttr(cmd.cpStart ?? "")}" cpLane="${xmlAttr(cmd.cpLane == null ? "" : String(cmd.cpLane))}"/>\n`;
+    `<commands id="${xmlAttr(cmd.id)}" action="${xmlAttr(cmd.action)}" vehicleId="${xmlAttr(cmd.vehicleId)}" targetId="${xmlAttr(cmd.targetId ?? "")}" mode="${xmlAttr(cmd.mode ?? "")}" secondTargetId="${xmlAttr(cmd.secondTargetId ?? "")}" fillType="${xmlAttr(cmd.fillType ?? "")}" cpStart="${xmlAttr(cmd.cpStart ?? "")}" cpLane="${xmlAttr(cmd.cpLane == null ? "" : String(cmd.cpLane))}" x="${xmlAttr(cmd.x == null ? "" : String(cmd.x))}" z="${xmlAttr(cmd.z == null ? "" : String(cmd.z))}"/>\n`;
   const tmp = `${COMMAND_FILE}.tmp`;
   try {
     mkdirSync(SETTINGS_DIR, { recursive: true });
@@ -427,6 +439,19 @@ function commandFromBody(body: unknown): CommandMessage | { error: string } {
   const raw = body as Record<string, unknown>;
   if (typeof raw.action !== "string" || raw.action === "") return { error: "command requires action" };
   if (!isWhitelistAction(raw.action)) return { error: `Unsupported action: ${raw.action}` };
+  if (raw.action === "field.scan") {
+    if (typeof raw.x !== "number" || typeof raw.z !== "number" || !Number.isFinite(raw.x) || !Number.isFinite(raw.z)) {
+      return { error: "command requires x and z" };
+    }
+    return {
+      type: "command",
+      id: typeof raw.id === "string" && raw.id !== "" ? raw.id : randomUUID(),
+      action: "field.scan",
+      vehicleId: typeof raw.vehicleId === "string" ? raw.vehicleId : "",
+      x: raw.x,
+      z: raw.z,
+    };
+  }
   if (typeof raw.vehicleId !== "string" || raw.vehicleId === "") return { error: "command requires vehicleId" };
 
   const cmd: CommandMessage = {
@@ -525,6 +550,42 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
 
   if (mockActive && !modSocket) {
     // Simulate command success against mock state.
+    if (cmd.action === "field.scan") {
+      if (typeof cmd.x !== "number" || typeof cmd.z !== "number" || !Number.isFinite(cmd.x) || !Number.isFinite(cmd.z)) {
+        const result: CommandResult = {
+          type: "commandResult",
+          id: cmd.id,
+          ok: false,
+          error: "Missing scan position",
+        };
+        replyToClient(from, result);
+        broadcast(result);
+        return result;
+      }
+      const half = 40;
+      const id = `scan:${Math.round(cmd.x)}:${Math.round(cmd.z)}`;
+      mockScannedFields.set(id, {
+        id,
+        name: "Custom",
+        fruitType: "grass",
+        growthState: null,
+        growthMax: null,
+        owned: true,
+        x: cmd.x,
+        z: cmd.z,
+        polygon: [
+          { x: cmd.x - half, z: cmd.z - half },
+          { x: cmd.x + half, z: cmd.z - half },
+          { x: cmd.x + half, z: cmd.z + half },
+          { x: cmd.x - half, z: cmd.z + half },
+        ],
+        areaHa: 0.64,
+        cropState: "Growing",
+      });
+      latestState = applyMockFields(applyMockAd({ ...latestState, ts: Date.now() }));
+      lastStateTs = latestState.ts;
+      broadcast(latestState);
+    }
     if (cmd.action === "engine.start" || cmd.action === "engine.stop") {
       const on = cmd.action === "engine.start";
       latestState = {
@@ -753,7 +814,8 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
     return result;
   }
 
-  // Timeout pending commands after 8s
+  // A field trace walks the density map across frames, so it can outlast a vehicle command.
+  const timeoutMs = cmd.action === "field.scan" ? 60_000 : 8_000;
   setTimeout(() => {
     if (!pendingCommands.has(cmd.id)) return;
     pendingCommands.delete(cmd.id);
@@ -765,7 +827,7 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
     };
     replyToClient(from, result);
     broadcast(result);
-  }, 8000);
+  }, timeoutMs);
 
   return {
     type: "commandResult",
@@ -960,13 +1022,20 @@ wss.on("connection", (ws, req) => {
 
     if (typed.type === "command") {
       const cmd = msg as CommandMessage;
-      if (!cmd.id || !cmd.action || !cmd.vehicleId) {
+      if (!cmd.id || !cmd.action || (cmd.action !== "field.scan" && !cmd.vehicleId)) {
         ws.send(
           JSON.stringify({
             type: "error",
             message: "command requires id, action, vehicleId",
           }),
         );
+        return;
+      }
+      if (
+        cmd.action === "field.scan" &&
+        (typeof cmd.x !== "number" || typeof cmd.z !== "number" || !Number.isFinite(cmd.x) || !Number.isFinite(cmd.z))
+      ) {
+        ws.send(JSON.stringify({ type: "error", message: "command requires x and z" }));
         return;
       }
       handleCommand(cmd, ws);

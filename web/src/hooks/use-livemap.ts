@@ -138,6 +138,8 @@ export function useLivemap() {
         fillType?: string;
         cpStart?: CourseplayStart;
         cpLane?: number;
+        x?: number;
+        z?: number;
       },
     ) => {
       const cmd = createCommand(action, vehicleId, targetId, extra);

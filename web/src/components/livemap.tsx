@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import type { AutoDriveGraph, FarmInfo, Field, GameState, MapPlayer, Vehicle } from "@/lib/types";
+import type { AutoDriveGraph, CommandResult, FarmInfo, Field, GameState, MapPlayer, Vehicle } from "@/lib/types";
 import { fruitColor } from "@/lib/crop-calendar";
 import { machineColor } from "@/lib/machine-colors";
 import type { MapImageFit } from "@/lib/settings";
@@ -19,6 +19,18 @@ type Props = {
   selectedFieldId?: string | null;
   /** When set and available, routes stay drawn. The main livemap omits this. */
   autoDrive?: AutoDriveGraph | null;
+  /** Returns the command id, or an empty string when the bridge is not connected. */
+  onScan?: (x: number, z: number) => string;
+  scanResult?: CommandResult | null;
+};
+
+type ScanAnchor = {
+  x: number;
+  z: number;
+  onField: boolean;
+  phase: "ready" | "scanning" | "error";
+  commandId: string | null;
+  error: string | null;
 };
 
 type View = {
@@ -94,6 +106,39 @@ function worldToPct(x: number, z: number, frame: MapFrame): { left: number; top:
     left: ((x - frame.minX) / frame.span) * 100,
     top: ((z - frame.minZ) / frame.span) * 100,
   };
+}
+
+function worldFromClient(
+  clientX: number,
+  clientY: number,
+  rect: DOMRect,
+  view: View,
+  frame: MapFrame,
+  width: number,
+  height: number,
+) {
+  const localX = (clientX - rect.left - view.x) / view.scale;
+  const localY = (clientY - rect.top - view.y) / view.scale;
+  return {
+    x: frame.minX + (localX / width) * frame.span,
+    z: frame.minZ + (localY / height) * frame.span,
+  };
+}
+
+function pointInRing(x: number, z: number, polygon: Array<{ x: number; z: number }>) {
+  let inside = false;
+  for (let index = 0, previous = polygon.length - 1; index < polygon.length; previous = index++) {
+    const current = polygon[index];
+    const prior = polygon[previous];
+    if (current == null || prior == null) continue;
+    if (current.z > z !== prior.z > z) {
+      const span = prior.z - current.z;
+      if (span !== 0 && x < ((prior.x - current.x) * (z - current.z)) / span + current.x) {
+        inside = !inside;
+      }
+    }
+  }
+  return inside;
 }
 
 function screenOf(
@@ -821,6 +866,8 @@ export function Livemap({
   selectedPlayerId,
   selectedFieldId,
   autoDrive,
+  onScan,
+  scanResult,
 }: Props) {
   const { settings, mapImageUrl } = useSettings();
   const colorFor = (vehicle: Vehicle) => machineColor(vehicle, settings.colors);
@@ -836,6 +883,7 @@ export function Livemap({
   const [farmsOpen, setFarmsOpen] = useState(false);
   const { enabledFarmIds, setFarmEnabled } = useLivemapContext();
   const [bounds, setBounds] = useState({ w: 0, h: 0 });
+  const [scan, setScan] = useState<ScanAnchor | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef(view);
   const suppressClickRef = useRef(false);
@@ -949,6 +997,19 @@ export function Livemap({
     };
   };
 
+  useEffect(() => {
+    if (!scanResult) return;
+    setScan((current) => {
+      if (!current?.commandId || current.commandId !== scanResult.id) return current;
+      if (scanResult.ok) return null;
+      return {
+        ...current,
+        phase: "error",
+        error: scanResult.error ?? "Field scan failed",
+      };
+    });
+  }, [scanResult]);
+
   const selectPressedTarget = (target: EventTarget | null) => {
     if (!(target instanceof Element)) return;
     const vehicleButton = target.closest("[data-vehicle-id]");
@@ -973,7 +1034,34 @@ export function Livemap({
     if (field != null) onSelectField?.(field);
   };
 
+  const placeScan = (clientX: number, clientY: number) => {
+    const viewport = viewportRef.current;
+    if (!onScan || viewport == null || bounds.w <= 0 || bounds.h <= 0) return;
+    const world = worldFromClient(
+      clientX,
+      clientY,
+      viewport.getBoundingClientRect(),
+      viewRef.current,
+      frame,
+      bounds.w,
+      bounds.h,
+    );
+    if (!Number.isFinite(world.x) || !Number.isFinite(world.z)) return;
+    const onField = fields.some(
+      (field) => field.polygon != null && field.polygon.length >= 3 && pointInRing(world.x, world.z, field.polygon),
+    );
+    setScan({
+      x: world.x,
+      z: world.z,
+      onField,
+      phase: "ready",
+      commandId: null,
+      error: null,
+    });
+  };
+
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.target instanceof Element && event.target.closest("[data-scan-button]")) return;
     if (event.button !== 0 && event.pointerType === "mouse") return;
     pressTargetRef.current = event.target;
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
@@ -1046,6 +1134,7 @@ export function Livemap({
   };
 
   const endPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!pointersRef.current.has(event.pointerId)) return;
     const gesture = gestureRef.current;
     const pressed = pressTargetRef.current;
     pointersRef.current.delete(event.pointerId);
@@ -1059,6 +1148,14 @@ export function Livemap({
       }, 0);
     } else if (pointersRef.current.size === 0) {
       // Pointer capture sends the click to the map, so select from the original press.
+      const hitMachine =
+        pressed instanceof Element &&
+        (pressed.closest("[data-vehicle-id]") != null || pressed.closest("[data-player-id]") != null);
+      if (hitMachine) {
+        setScan(null);
+      } else {
+        placeScan(event.clientX, event.clientY);
+      }
       selectPressedTarget(pressed);
     }
     pressTargetRef.current = null;
@@ -1335,6 +1432,42 @@ export function Livemap({
               </AnchoredLabel>
             );
           })}
+          {scan && onScan ? (
+            <div
+              className="pointer-events-auto absolute"
+              style={{
+                left: screenOf(worldToPct(scan.x, scan.z, frame), bounds.w, bounds.h, view).x,
+                top: screenOf(worldToPct(scan.x, scan.z, frame), bounds.w, bounds.h, view).y,
+              }}
+            >
+              <button
+                type="button"
+                data-scan-button=""
+                disabled={scan.phase === "scanning"}
+                className={`${toolClass} max-w-64 -translate-x-1/2 -translate-y-[calc(100%+12px)] cursor-pointer text-center whitespace-normal disabled:cursor-default disabled:opacity-80`}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  if (scan.phase === "scanning") return;
+                  const id = onScan(scan.x, scan.z);
+                  if (id === "") {
+                    setScan({ ...scan, phase: "error", commandId: null, error: "Not connected to bridge" });
+                    return;
+                  }
+                  setScan({ ...scan, phase: "scanning", commandId: id, error: null });
+                }}
+              >
+                {scan.phase === "scanning"
+                  ? "Scanning…"
+                  : scan.phase === "error"
+                    ? scan.error ?? "Field scan failed"
+                    : scan.onField
+                      ? "Scan fieldboundary"
+                      : "Scan for field"}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
