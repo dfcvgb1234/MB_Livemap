@@ -14,7 +14,6 @@ type ConnectLink = { url: string; qr: string };
 
 type ConnectInfo = {
   links: ConnectLink[];
-  mod: { status: string; message: string };
 };
 
 type ConnectValue = {
@@ -36,7 +35,7 @@ async function loadConnect(): Promise<ConnectInfo | null> {
   const response = await fetch("/api/connect");
   if (!response.ok) return null;
   const data = (await response.json()) as ConnectInfo;
-  if (!data || !Array.isArray(data.links) || !data.mod) return null;
+  if (!data || !Array.isArray(data.links)) return null;
   return data;
 }
 
@@ -61,14 +60,6 @@ export function ConnectProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <ConnectContext.Provider value={{ info, open, setOpen, reload }}>{children}</ConnectContext.Provider>
-  );
-}
-
-export function ModBanner() {
-  const { info } = useConnect();
-  if (!info?.mod.message) return null;
-  return (
-    <div className="bg-[#e2b657] px-[18px] py-2.5 text-sm font-semibold text-[#2a2112]">{info.mod.message}</div>
   );
 }
 

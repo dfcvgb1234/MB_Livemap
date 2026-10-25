@@ -170,7 +170,6 @@ $launcherArgs += "/out:$(Join-Path $dest 'MB Livemap.exe')"
 $launcherArgs += (Join-Path $PSScriptRoot "packaging\Launcher.cs")
 & $csc @launcherArgs
 Assert-Exit "launcher"
-Set-Content -Path (Join-Path $dest "app\version.txt") -Value $version -Encoding ascii
 
 Write-Host "Fetching the Node.js runtime..."
 $cache = Join-Path $Root "release\cache"

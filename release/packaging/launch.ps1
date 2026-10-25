@@ -26,24 +26,9 @@ if (-not (Test-Path $node)) {
   exit 1
 }
 
-$rule = netsh advfirewall firewall show rule name="MB Livemap" | Out-String
-if ($rule -notmatch "43127") {
-  try {
-    Start-Process -FilePath (Join-Path $Root "Allow tablet.bat") -Verb RunAs -Wait | Out-Null
-  } catch {
-    # Allow tablet.bat can be run again if this prompt was dismissed.
-  }
-}
-
 $logDir = Join-Path $Root "app\logs"
 if (-not (Test-Path $logDir)) {
   New-Item -ItemType Directory -Path $logDir | Out-Null
-}
-
-$versionFile = Join-Path $Root "app\version.txt"
-$version = ""
-if (Test-Path $versionFile) {
-  $version = (Get-Content -Raw $versionFile).Trim()
 }
 
 $psi = New-Object System.Diagnostics.ProcessStartInfo
@@ -54,8 +39,16 @@ $psi.UseShellExecute = $false
 $psi.CreateNoWindow = $true
 $psi.EnvironmentVariables["MB_LIVEMAP_STATIC"] = (Join-Path $Root "app\web")
 $psi.EnvironmentVariables["MB_LIVEMAP_MOD_ZIP"] = (Join-Path $Root "mod\FS25_MB_Livemap.zip")
-$psi.EnvironmentVariables["MB_LIVEMAP_VERSION"] = $version
-$psi.EnvironmentVariables["MB_LIVEMAP_PORT"] = "43127"
+# MB Livemap.exe owns port 43127, so Windows Firewall asks about that program.
+# The bridge stays on this computer and learns the tablet's address from the proxy header.
+if ($env:MB_LIVEMAP_LAN_PROXY -eq "1") {
+  $psi.EnvironmentVariables["MB_LIVEMAP_BIND"] = "127.0.0.1"
+  $psi.EnvironmentVariables["MB_LIVEMAP_PORT"] = "43126"
+  $psi.EnvironmentVariables["MB_LIVEMAP_PUBLIC_PORT"] = "43127"
+  $psi.EnvironmentVariables["MB_LIVEMAP_PROXY_PROTOCOL"] = "1"
+} else {
+  $psi.EnvironmentVariables["MB_LIVEMAP_PORT"] = "43127"
+}
 $psi.EnvironmentVariables["MB_LIVEMAP_LOG"] = (Join-Path $logDir "bridge.log")
 
 $process = [System.Diagnostics.Process]::Start($psi)

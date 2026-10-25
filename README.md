@@ -8,36 +8,18 @@ The page shows your vehicles, fields, weather, productions, and animals. From a 
 
 You need Windows and Farming Simulator 25.
 
-You can download the latest version from here:
-[Latest version](https://github.com/dfcvgb1234/MB_Livemap/releases).
-
-1. Run **MB-Livemap-Setup.exe**.
-2. When it finishes, leave **Start MB Livemap** ticked. A small window opens and stays open, and the farm page opens in your browser. An icon also sits by the clock. Double-click that icon to bring the window back after you minimize it.
-3. If Windows asks for permission, click **Yes**. That lets a phone or tablet on your Wi-Fi open the page.
-4. Start Farming Simulator. On the screen where you choose mods, turn on **MB Livemap Bridge**. Then load your save.
-5. Go back to the browser. The map fills in after the save has loaded.
+1. Download **MB Livemap.zip** from the [latest release](https://github.com/dfcvgb1234/MB_Livemap/releases).
+2. Extract the zip into a folder you choose. Leave those files where they are. MB Livemap runs from that folder.
+3. In the extracted files, open the `mod` folder and copy `FS25_MB_Livemap.zip` into your Farming Simulator mods folder: `Documents\My Games\FarmingSimulator2025\mods`. If the game is already open, close it first so it picks up the new mod.
+4. Double-click **MB Livemap.exe**. A small window opens and stays open, and the farm page opens in your browser. An icon also sits by the clock. Double-click that icon to bring the window back after you minimize it.
+5. The page on this computer opens without an administrator prompt. The first time a phone or tablet on your Wi-Fi connects, Windows Firewall asks whether to allow **MB Livemap**. Click **Allow access**. That question is from Windows Firewall. MB Livemap does not ask to run as administrator, and this computer's page still works if you click **Cancel**.
+6. Start Farming Simulator. On the screen where you choose mods, turn on **MB Livemap Bridge**, then load your save. When the save has loaded, go back to the browser. The map fills in on its own.
 
 Leave the MB Livemap window open while you play. You can minimize it. To turn the page off, close that window or click **Stop**. The game keeps running.
 
 **On a phone or tablet:** join the same Wi-Fi as the computer. On the farm page, tap the tablet icon and scan the code with the camera. The game stays on the computer. The phone only shows the page.
 
-The first time MB Livemap starts, it copies the mod into your Farming Simulator mods folder (`Documents\My Games\FarmingSimulator2025\mods`). If the game was already open, close it, start MB Livemap, then start the game again so **MB Livemap Bridge** is in the list. A yellow bar at the top of the page says when the mod was added, when a newer copy was installed, or when the mods folder could not be found.
-
-If the phone cannot open the page, set the computer's Wi-Fi to a private network: Windows Settings, Network and internet, Wi-Fi, your network name, then Private.
-
-## Run the folder without the setup program
-
-A folder named **MB Livemap** (it contains `MB Livemap.exe`) is the whole program. Node.js is already inside it.
-
-1. Copy that folder onto the computer you play on.
-2. Double-click **MB Livemap**.
-3. Follow the Play steps from the Windows permission prompt onward.
-
-To stop it, close the window, click **Stop**, or double-click **Stop MB Livemap** in the same folder.
-
-`release\BuildRelease.ps1` creates this folder at `release\out\MB Livemap`. With [Inno Setup 6](https://jrsoftware.org/isinfo.php) installed, the same script also creates `release\out\MB-Livemap-Setup.exe`.
-
-Put `icon.png` or `icon.ico` in `release\packaging` before that build. The window, the tray, and `MB Livemap.exe` use it. `icon.ico` wins when both are there.
+Windows asks that firewall question when the Wi-Fi is a private network. If the phone cannot open the page, set the computer's Wi-Fi to a private network: Windows Settings, Network and internet, Wi-Fi, your network name, then Private. A public network blocks the phone without asking. If you chose Cancel earlier, allow MB Livemap on private networks under Windows Security, Firewall and network protection, Allow an app through firewall.
 
 ## Run it from this project
 

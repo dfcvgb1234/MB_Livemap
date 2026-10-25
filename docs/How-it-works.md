@@ -130,7 +130,7 @@ The bridge and the mod run in the host's game on that Windows PC. A dedicated se
 
 ## The packaged program
 
-`MB Livemap.exe` opens a small window and a tray icon, then starts a private Node runtime on `bridge.cjs`. That process serves the built page, the HTTP routes, and the WebSocket on port **43127**. The development layout uses three ports: the page on 43127, the WebSocket on 18766, and HTTP on 18767.
+`MB Livemap.exe` opens a small window and a tray icon, then starts a private Node runtime on `bridge.cjs`. The program accepts network connections on port **43127** and forwards them to that runtime, which listens only on this computer. The first time a phone or tablet connects, Windows Firewall asks to allow MB Livemap. The program does not ask for administrator access. The development layout uses three ports: the page on 43127, the WebSocket on 18766, and HTTP on 18767.
 
 The window can be minimized. The icon by the clock brings it back. Closing the window stops the bridge. Starting the program again while it is already running brings that window back and opens the page.
 
