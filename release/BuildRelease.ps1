@@ -12,6 +12,92 @@ function Assert-Exit([string]$What) {
   }
 }
 
+function Export-PngIcon([string]$Png, [string]$Ico) {
+  Add-Type -AssemblyName System.Drawing
+  $source = [System.Drawing.Image]::FromFile((Resolve-Path $Png))
+  try {
+    $sizes = @(16, 32, 48, 256)
+    $frames = New-Object System.Collections.Generic.List[byte[]]
+    foreach ($size in $sizes) {
+      $bmp = New-Object System.Drawing.Bitmap $size, $size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
+      $graphics = [System.Drawing.Graphics]::FromImage($bmp)
+      $graphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+      $graphics.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
+      $graphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+      $graphics.Clear([System.Drawing.Color]::Transparent)
+      $scale = [Math]::Min($size / $source.Width, $size / $source.Height)
+      $w = [Math]::Max(1, [int][Math]::Round($source.Width * $scale))
+      $h = [Math]::Max(1, [int][Math]::Round($source.Height * $scale))
+      $graphics.DrawImage($source, [int](($size - $w) / 2), [int](($size - $h) / 2), $w, $h)
+      $graphics.Dispose()
+
+      $rect = New-Object System.Drawing.Rectangle 0, 0, $size, $size
+      $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, $bmp.PixelFormat)
+      $stride = [Math]::Abs($data.Stride)
+      $raw = New-Object byte[] ($stride * $size)
+      [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $raw, 0, $raw.Length)
+      $bmp.UnlockBits($data)
+      $bmp.Dispose()
+
+      $rowBytes = $size * 4
+      $xor = New-Object byte[] ($rowBytes * $size)
+      for ($y = 0; $y -lt $size; $y++) {
+        [Array]::Copy($raw, $y * $stride, $xor, ($size - 1 - $y) * $rowBytes, $rowBytes)
+      }
+      $maskStride = [int][Math]::Ceiling($size / 32.0) * 4
+      $mask = New-Object byte[] ($maskStride * $size)
+
+      $image = New-Object System.IO.MemoryStream
+      $writer = New-Object System.IO.BinaryWriter $image
+      $writer.Write([int]40)
+      $writer.Write([int]$size)
+      $writer.Write([int]($size * 2))
+      $writer.Write([int16]1)
+      $writer.Write([int16]32)
+      $writer.Write([int]0)
+      $writer.Write([int]($xor.Length + $mask.Length))
+      $writer.Write([int]0)
+      $writer.Write([int]0)
+      $writer.Write([int]0)
+      $writer.Write([int]0)
+      $writer.Write($xor)
+      $writer.Write($mask)
+      $writer.Flush()
+      $frames.Add($image.ToArray())
+      $writer.Dispose()
+    }
+
+    $count = $frames.Count
+    $offset = 6 + (16 * $count)
+    $output = New-Object System.IO.MemoryStream
+    $header = New-Object System.IO.BinaryWriter $output
+    $header.Write([uint16]0)
+    $header.Write([uint16]1)
+    $header.Write([uint16]$count)
+    for ($i = 0; $i -lt $count; $i++) {
+      $size = $sizes[$i]
+      $dim = if ($size -ge 256) { [byte]0 } else { [byte]$size }
+      $header.Write($dim)
+      $header.Write($dim)
+      $header.Write([byte]0)
+      $header.Write([byte]0)
+      $header.Write([uint16]1)
+      $header.Write([uint16]32)
+      $header.Write([uint32]$frames[$i].Length)
+      $header.Write([uint32]$offset)
+      $offset += $frames[$i].Length
+    }
+    foreach ($frame in $frames) {
+      $header.Write($frame)
+    }
+    $header.Flush()
+    [System.IO.File]::WriteAllBytes($Ico, $output.ToArray())
+    $header.Dispose()
+  } finally {
+    $source.Dispose()
+  }
+}
+
 $desc = Get-Content -Raw (Join-Path $Root "mod\modDesc.xml")
 if ($desc -notmatch "<version>([^<]+)</version>") {
   throw "Could not read the mod version from mod\modDesc.xml"
@@ -58,6 +144,12 @@ Pop-Location
 Copy-Item (Join-Path $Root "server\dist\bridge.cjs") (Join-Path $dest "app\bridge.cjs")
 Copy-Item (Join-Path $Root "web\out\*") (Join-Path $dest "app\web") -Recurse
 Copy-Item (Join-Path $PSScriptRoot "packaging\*") $dest -Exclude "Launcher.cs"
+$iconIco = Join-Path $dest "icon.ico"
+$iconPng = Join-Path $dest "icon.png"
+if (-not (Test-Path $iconIco) -and (Test-Path $iconPng)) {
+  Write-Host "Building icon.ico from icon.png..."
+  Export-PngIcon -Png $iconPng -Ico $iconIco
+}
 $csc = @(
   "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
   "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
@@ -65,7 +157,18 @@ $csc = @(
 if (-not $csc) {
   throw "The Windows C# compiler was not found, so MB Livemap.exe could not be built."
 }
-& $csc /nologo /target:winexe /reference:System.Windows.Forms.dll /reference:System.Drawing.dll "/out:$(Join-Path $dest 'MB Livemap.exe')" (Join-Path $PSScriptRoot "packaging\Launcher.cs")
+$launcherArgs = @(
+  "/nologo",
+  "/target:winexe",
+  "/reference:System.Windows.Forms.dll",
+  "/reference:System.Drawing.dll"
+)
+if (Test-Path $iconIco) {
+  $launcherArgs += "/win32icon:$iconIco"
+}
+$launcherArgs += "/out:$(Join-Path $dest 'MB Livemap.exe')"
+$launcherArgs += (Join-Path $PSScriptRoot "packaging\Launcher.cs")
+& $csc @launcherArgs
 Assert-Exit "launcher"
 Set-Content -Path (Join-Path $dest "app\version.txt") -Value $version -Encoding ascii
 

@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Drawing.Imaging;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
@@ -79,7 +80,7 @@ namespace MBLivemap
             ClientSize = new Size(440, 188);
             StartPosition = FormStartPosition.CenterScreen;
             Font = new Font("Segoe UI", 10f);
-            Icon = MakeIcon();
+            Icon = LoadIcon(folder);
 
             Label heading = new Label();
             heading.Text = "MB Livemap";
@@ -422,22 +423,93 @@ namespace MBLivemap
             base.OnFormClosing(e);
         }
 
-        static Icon MakeIcon()
+        static Icon LoadIcon(string folder)
         {
-            Bitmap bmp = new Bitmap(32, 32);
-            using (Graphics g = Graphics.FromImage(bmp))
+            string ico = Path.Combine(folder, "icon.ico");
+            if (File.Exists(ico))
             {
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.Clear(Color.FromArgb(27, 107, 58));
-                using (Brush white = new SolidBrush(Color.White))
-                    g.FillEllipse(white, 8, 8, 16, 16);
+                try
+                {
+                    return new Icon(ico);
+                }
+                catch (Exception)
+                {
+                }
             }
-            IntPtr handle = bmp.GetHicon();
-            Icon raw = Icon.FromHandle(handle);
-            Icon clone = (Icon)raw.Clone();
-            DestroyIcon(handle);
-            bmp.Dispose();
-            return clone;
+
+            string png = Path.Combine(folder, "icon.png");
+            if (File.Exists(png))
+            {
+                try
+                {
+                    return IconFromPng(png);
+                }
+                catch (Exception)
+                {
+                }
+            }
+
+            return DrawFallbackIcon();
+        }
+
+        static Icon IconFromPng(string path)
+        {
+            using (Bitmap source = new Bitmap(path))
+            using (Bitmap square = new Bitmap(256, 256, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics g = Graphics.FromImage(square))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                    g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                    g.Clear(Color.Transparent);
+                    g.DrawImage(source, FitRect(source.Width, source.Height, 256));
+                }
+                IntPtr handle = square.GetHicon();
+                try
+                {
+                    using (Icon raw = Icon.FromHandle(handle))
+                        return (Icon)raw.Clone();
+                }
+                finally
+                {
+                    DestroyIcon(handle);
+                }
+            }
+        }
+
+        static Rectangle FitRect(int width, int height, int box)
+        {
+            if (width <= 0 || height <= 0)
+                return new Rectangle(0, 0, box, box);
+            float scale = Math.Min((float)box / width, (float)box / height);
+            int w = Math.Max(1, (int)Math.Round(width * scale));
+            int h = Math.Max(1, (int)Math.Round(height * scale));
+            return new Rectangle((box - w) / 2, (box - h) / 2, w, h);
+        }
+
+        static Icon DrawFallbackIcon()
+        {
+            using (Bitmap bmp = new Bitmap(32, 32, PixelFormat.Format32bppArgb))
+            {
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.Clear(Color.FromArgb(27, 107, 58));
+                    using (Brush white = new SolidBrush(Color.White))
+                        g.FillEllipse(white, 8, 8, 16, 16);
+                }
+                IntPtr handle = bmp.GetHicon();
+                try
+                {
+                    using (Icon raw = Icon.FromHandle(handle))
+                        return (Icon)raw.Clone();
+                }
+                finally
+                {
+                    DestroyIcon(handle);
+                }
+            }
         }
 
         [DllImport("user32.dll", CharSet = CharSet.Auto)]

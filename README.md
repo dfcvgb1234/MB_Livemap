@@ -1,98 +1,127 @@
-# MB Livemap — FS25 Livemap + Dashboard
+# MB Livemap
 
-Local-only Farming Simulator 25 companion: a Lua mod streams farm state to a Node bridge, which fans out over WebSocket to a tablet-first Next.js dashboard.
+MB Livemap shows your Farming Simulator 25 farm in a web page. Open it on the computer you play on, or on a phone or tablet on the same Wi-Fi.
 
-```
-FS25 Lua mod  --named pipe JSON lines-->  Node bridge  --WebSocket-->  Tablet webapp
-              \\.\pipe\mb-livemap              :18766
-```
+The page shows your vehicles, fields, weather, productions, and animals. From a vehicle you can start and stop the engine. If AutoDrive or Courseplay is in your mod list, you can start those from the page too. Precision Farming soil, pH, and nitrogen show up while that mod is loaded.
 
-FS25 mods cannot load LuaSocket. On Windows the mod writes state to the named pipe above. Vehicle commands go back through `modSettings/FS25_MB_Livemap/commands.xml`.
+## Play
 
-## Quick start (UI without the game)
+You need Windows and Farming Simulator 25.
+
+1. Run **MB-Livemap-Setup.exe**.
+2. When it finishes, leave **Start MB Livemap** ticked. A small window opens and stays open, and the farm page opens in your browser. An icon also sits by the clock. Double-click that icon to bring the window back after you minimize it.
+3. If Windows asks for permission, click **Yes**. That lets a phone or tablet on your Wi-Fi open the page.
+4. Start Farming Simulator. On the screen where you choose mods, turn on **MB Livemap Bridge**. Then load your save.
+5. Go back to the browser. The map fills in after the save has loaded.
+
+Leave the MB Livemap window open while you play. You can minimize it. To turn the page off, close that window or click **Stop**. The game keeps running.
+
+**On a phone or tablet:** join the same Wi-Fi as the computer. On the farm page, tap the tablet icon and scan the code with the camera. The game stays on the computer. The phone only shows the page.
+
+The first time MB Livemap starts, it copies the mod into your Farming Simulator mods folder (`Documents\My Games\FarmingSimulator2025\mods`). If the game was already open, close it, start MB Livemap, then start the game again so **MB Livemap Bridge** is in the list. A yellow bar at the top of the page says when the mod was added, when a newer copy was installed, or when the mods folder could not be found.
+
+If the phone cannot open the page, set the computer's Wi-Fi to a private network: Windows Settings, Network and internet, Wi-Fi, your network name, then Private.
+
+## Run the folder without the setup program
+
+A folder named **MB Livemap** (it contains `MB Livemap.exe`) is the whole program. Node.js is already inside it.
+
+1. Copy that folder onto the computer you play on.
+2. Double-click **MB Livemap**.
+3. Follow the Play steps from the Windows permission prompt onward.
+
+To stop it, close the window, click **Stop**, or double-click **Stop MB Livemap** in the same folder.
+
+`release\BuildRelease.ps1` creates this folder at `release\out\MB Livemap`. With [Inno Setup 6](https://jrsoftware.org/isinfo.php) installed, the same script also creates `release\out\MB-Livemap-Setup.exe`.
+
+Put `icon.png` or `icon.ico` in `release\packaging` before that build. The window, the tray, and `MB Livemap.exe` use it. `icon.ico` wins when both are there.
+
+## Run it from this project
+
+This uses the files in the repository. Install [Node.js 22](https://nodejs.org), then put the mod in the game:
+
+1. Double-click `release\CreateMod.bat`.
+2. Copy `release\FS25_MB_Livemap.zip` to `Documents\My Games\FarmingSimulator2025\mods`.
+3. In the game, turn on **MB Livemap Bridge** and load a save. After you replace that zip, restart the game.
+
+Double-click `release\StartLivemap.bat`. The first time, it installs the dependencies, starts the bridge and the page, and opens the browser. Leave both windows open. On a tablet, use the address the script prints. It asks Windows to allow ports 43127 and 18766 on private networks.
+
+Or start the two programs yourself:
 
 ```bash
-# Terminal 1 — bridge with animated mock farm
 cd server
 npm install
-npm run mock   # works on Windows/macOS/Linux (sets MB_LIVEMAP_MOCK via cross-env)
+npm start
+```
 
-# Terminal 2 — tablet dashboard
+```bash
 cd web
 npm install
 npm run dev
 ```
 
-Open **[http://127.0.0.1:43127](http://127.0.0.1:43127)**.
+Open [http://127.0.0.1:43127](http://127.0.0.1:43127).
 
-- Bridge pipe (mod): `\\.\pipe\mb-livemap`
-- Bridge WebSocket: `127.0.0.1:18766`
-- Bridge health: `http://127.0.0.1:18767/health`
+| What | Address |
+|------|---------|
+| Farm page | http://127.0.0.1:43127 |
+| Live updates | ws://127.0.0.1:18766 |
+| Health, state, and commands | http://127.0.0.1:18767 |
 
-## Install for someone else
+The packaged program is different: the page, the live updates, and the health address all share port **43127**.
 
-On a Windows PC, double-click `release\BuildRelease.ps1` (or run it from PowerShell). It writes `release\out\MB Livemap\`. Copy that folder to the player’s PC. They double-click **MB Livemap**. A window stays open while it is running, and the icon also appears by the clock. The first start copies `FS25_MB_Livemap.zip` into the Farming Simulator mods folder and opens the dashboard. They enable **MB Livemap Bridge** once in the mod list. Closing the window stops it.
+## Develop
 
-If [Inno Setup 6](https://jrsoftware.org/isinfo.php) is installed, the same script also writes `release\out\MB-Livemap-Setup.exe`.
+Two terminals, from this repository, with Node.js 22:
 
-`release\StartLivemap.bat` is the developer launcher. It still needs Node.js and runs the live dev servers.
+```bash
+# Terminal 1 — bridge. Reloads when server/src changes.
+cd server
+npm install
+npm run dev
 
-## Install the FS25 mod by hand
+# Terminal 2 — farm page
+cd web
+npm install
+npm run dev
+```
 
-1. Run `release\CreateMod.bat` and copy `release\FS25_MB_Livemap.zip` to `%USERPROFILE%\Documents\My Games\FarmingSimulator2025\mods\`.
-2. Double-click `release\StartLivemap.bat` before you load a save. It starts the bridge and the dashboard, then opens http://127.0.0.1:43127. Leave those two windows open while you play.
-3. Enable **MB Livemap Bridge** in the mod selection screen and load a savegame.
+To work on the page with no game running, start the bridge with a moving sample farm instead:
 
-See `mod/README.md` for protocol notes. The game must be restarted after updating the mod zip.
+```bash
+cd server
+npm run mock
+```
 
-## Repo layout
+The sample farm works on Windows, macOS, and Linux. The Farming Simulator mod itself needs Windows, because the game writes to a named pipe.
 
-| Path | Role |
-|------|------|
-| `mod/` | FS25 Lua mod — snapshots + whitelisted commands |
-| `server/` | Named-pipe ↔ WebSocket bridge, state cache, mock injector |
-| `web/` | Next.js tablet UI (home livemap, productions, animals) |
-| `examples/` | Reference mods used while building this one |
-| `release/` | Installer script, player packaging, and built packages |
+`npm start` in `server` runs the bridge once. `npm run dev` restarts it when the source changes. `npm run typecheck` checks the bridge. `npm run bundle` writes `server\dist\bridge.cjs`, which the packaged program runs.
 
-## Commands (whitelist)
+An MCP server in `server/` can read the same farm and run the same vehicle commands. Start the bridge first. In development it is at `http://127.0.0.1:18767/mcp`. The packaged program serves it at `http://127.0.0.1:43127/mcp`. Both accept that connection from this computer only. Cursor can enable the **mb-livemap** stdio server from `.vscode/mcp.json`. Set `MB_LIVEMAP_HTTP` when that stdio server should talk to a bridge on another address. The player setup program does not include it.
 
-From the vehicle sheet on the livemap:
-
-- `engine.start` / `engine.stop`
-- `attach` / `detach` (requires FS25 API support; may return unsupported)
-
-Unknown actions are rejected by the bridge and the mod.
-
-AutoDrive adds destination listing plus `autodrive.start` / `autodrive.stop` (including a fieldwork mode that runs a Courseplay course). Courseplay adds the saved-course list plus `courseplay.start` / `courseplay.stop`. Precision Farming adds soil type, pH, and nitrogen on each field. Those show up only while the corresponding mod is loaded.
-
-## AI / MCP
-
-An MCP server in `server/` lets an assistant read fields, vehicles, weather, the crop calendar, productions, and animals, and run the same whitelisted commands. Start the bridge first (`npm run dev`, `npm run mock`, or the desktop app). It serves Streamable HTTP MCP at `http://127.0.0.1:18767/mcp` in development and `http://127.0.0.1:43127/mcp` for the packaged app. That is the server URL for a client that asks for one. Cursor can instead enable the **mb-livemap** stdio server from `.vscode/mcp.json`. Set `MB_LIVEMAP_HTTP` when that stdio server should talk to a bridge on another address.
-
-AutoDrive commands are `list_autodrive_destinations`, `start_autodrive`, and `stop_autodrive`. Courseplay commands are `list_courseplay_courses`, `start_courseplay`, and `stop_courseplay`. They stay in the tool list; a call returns an error when that mod is not loaded. Precision Farming adds soil type, pH, and nitrogen on the field tools while it is active. The server is not part of the player installer.
-
-## Map background
-
-Place an optional top-down map PNG at `web/public/map-overlay.png` (from your map pack). Vehicles and field tints still work without it.
-
-## Environment
+Optional map picture: the page asks for one, or you can place a top-down PNG at `web/public/map-overlay.png`. Vehicles and field colors still work without it.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `MB_LIVEMAP_TCP_PORT` | `18765` | Legacy TCP port (unused by the FS25 mod) |
 | `MB_LIVEMAP_PIPE` | `\\.\pipe\mb-livemap` | Named pipe the mod writes to |
-| `MB_LIVEMAP_SETTINGS_DIR` | `Documents/My Games/FarmingSimulator2025/modSettings/FS25_MB_Livemap` | Command and session XML |
-| `MB_LIVEMAP_WS_PORT` | `18766` | Browser WebSocket port |
-| `MB_LIVEMAP_HTTP_PORT` | `18767` | Health / mock control HTTP |
-| `MB_LIVEMAP_MOCK` | unset | `1` to enable mock injector |
-| `MB_LIVEMAP_TOKEN` | unset | Optional WS auth token |
-| `MB_LIVEMAP_HTTP` | `http://127.0.0.1:18767`, then `:43127` | Bridge URL for the MCP server |
-| `NEXT_PUBLIC_WS_URL` | `ws://<host>:18766` | Override WS URL in the webapp |
+| `MB_LIVEMAP_TCP_PORT` | `18765` | Extra TCP listener. The FS25 mod uses the pipe. |
+| `MB_LIVEMAP_WS_PORT` | `18766` | WebSocket port while developing |
+| `MB_LIVEMAP_HTTP_PORT` | `18767` | Health, state, and settings while developing |
+| `MB_LIVEMAP_PORT` | `43127` | Page, WebSocket, and HTTP of the packaged program |
+| `MB_LIVEMAP_SETTINGS_DIR` | `Documents/My Games/FarmingSimulator2025/modSettings/FS25_MB_Livemap` | Command file, session file, and saved settings |
+| `MB_LIVEMAP_MOCK` | unset | `1` to run the sample farm |
+| `MB_LIVEMAP_TOKEN` | unset | When set, a WebSocket client must send this token |
+| `MB_LIVEMAP_HTTP` | `http://127.0.0.1:18767`, then `:43127` | Bridge address for the MCP server |
+| `MB_LIVEMAP_STATIC` | unset | Folder of the built page. Setting it turns on the packaged host. |
+| `NEXT_PUBLIC_WS_URL` | `ws://<host>:18766` in development | Override the page's WebSocket address |
+| `NEXT_PUBLIC_HTTP_URL` | `http://<host>:18767` in development | Override the page's bridge address |
 
-## Out of scope (v1)
+## Make your own app
 
-Multiplayer / dedicated server sync, economy, missions, cloud hosting.
+The page in this repo is one client. A phone, a script, or another site can open the same WebSocket, read the farm, and send the same commands. Two pages are written so they can be copied into the wiki:
+
+- [How it works](docs/How-it-works.md) — the mod, the pipe, and the bridge
+- [WebSocket](docs/WebSocket.md) — every message, with the fields a client needs
 
 ## License
 

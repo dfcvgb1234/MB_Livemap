@@ -21,7 +21,10 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayIcon={app}\runtime\node.exe
+#ifexist "..\out\MB Livemap\icon.ico"
+SetupIconFile="..\out\MB Livemap\icon.ico"
+#endif
+UninstallDisplayIcon={app}\MB Livemap.exe
 
 [Files]
 Source: "..\out\MB Livemap\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
