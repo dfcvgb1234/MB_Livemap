@@ -21,12 +21,19 @@ type Category = (typeof CATEGORIES)[number]["id"];
 const NOTIFICATION_LABELS: Record<(typeof NOTIFICATION_CHANNELS)[number], string> = {
   combineFull: "Combine almost full",
   trailerFull: "Trailer almost full",
+  seederEmpty: "Seeder almost empty",
+  sprayerEmpty: "Sprayer almost empty",
+  fertilizerEmpty: "Fertilizer spreader almost empty",
+  slurryEmpty: "Slurry spreader almost empty",
+  manureEmpty: "Manure spreader almost empty",
   adArrived: "AutoDrive arrived",
   adStuck: "AutoDrive stuck",
   adProblem: "AutoDrive problems",
   cpFinished: "Courseplay finished",
   productionMissing: "Production needs inputs",
   productionFull: "Production storage full",
+  animalMissing: "Animals need food or water",
+  animalFull: "Animal storage full",
 };
 
 function NotificationRow({
@@ -463,10 +470,25 @@ export function SettingsDialog() {
                     className="accent-[#e2b657]"
                   />
                 </label>
+                <label className="mt-2 flex flex-col gap-2 px-2 text-sm">
+                  <span>Almost empty at {settings.notifications.emptyThreshold}%</span>
+                  <input
+                    type="range"
+                    min={5}
+                    max={50}
+                    step={1}
+                    value={settings.notifications.emptyThreshold}
+                    aria-label="Almost empty threshold"
+                    onChange={(event) => setNotifications({ emptyThreshold: Number(event.target.value) })}
+                    className="accent-[#e2b657]"
+                  />
+                </label>
                 <p className="px-2 text-xs text-[#b7b1a4]">
                   Stays keeps an alert until you close it. Auto closes it after 8 seconds. Both are saved in the history.
                   Play sound uses the default unless an alert picks its own. None keeps that alert quiet. Other AutoDrive
-                  messages show with problems. Fuel and DEF are ignored.
+                  messages show with problems. Almost full covers combines, trailers, and animal products. Almost empty
+                  covers seeders, sprayers, fertilizer, slurry, and manure spreaders, plus animal food and water. Fuel
+                  and DEF are ignored. An empty food group stays quiet while another group still has feed.
                 </p>
               </section>
             ) : null}

@@ -24,6 +24,8 @@ export function defaultWsUrl() {
 }
 
 export function bridgeHttpUrl() {
+  const fromEnv = process.env.NEXT_PUBLIC_HTTP_URL?.trim().replace(/\/$/, "");
+  if (fromEnv) return fromEnv;
   if (typeof window === "undefined") return "http://127.0.0.1:18767";
   if (process.env.NODE_ENV === "development") {
     const host = window.location.hostname || "127.0.0.1";

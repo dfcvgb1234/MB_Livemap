@@ -6,22 +6,36 @@ export type MapImageFit = "pda" | "full";
 export type NotificationChannel =
   | "combineFull"
   | "trailerFull"
+  | "seederEmpty"
+  | "sprayerEmpty"
+  | "fertilizerEmpty"
+  | "slurryEmpty"
+  | "manureEmpty"
   | "adArrived"
   | "adStuck"
   | "adProblem"
   | "cpFinished"
   | "productionMissing"
-  | "productionFull";
+  | "productionFull"
+  | "animalMissing"
+  | "animalFull";
 
 export const NOTIFICATION_CHANNELS: NotificationChannel[] = [
   "combineFull",
   "trailerFull",
+  "seederEmpty",
+  "sprayerEmpty",
+  "fertilizerEmpty",
+  "slurryEmpty",
+  "manureEmpty",
   "adArrived",
   "adStuck",
   "adProblem",
   "cpFinished",
   "productionMissing",
   "productionFull",
+  "animalMissing",
+  "animalFull",
 ];
 
 export const NOTIFICATION_SOUNDS = ["chime", "bell", "ping", "alert", "soft"] as const;
@@ -34,15 +48,24 @@ export type NotificationSoundChoice = "default" | "none" | NotificationSoundId;
 export type NotificationSettings = {
   combineFull: boolean;
   trailerFull: boolean;
+  seederEmpty: boolean;
+  sprayerEmpty: boolean;
+  fertilizerEmpty: boolean;
+  slurryEmpty: boolean;
+  manureEmpty: boolean;
   adArrived: boolean;
   adStuck: boolean;
   adProblem: boolean;
   cpFinished: boolean;
   productionMissing: boolean;
   productionFull: boolean;
+  animalMissing: boolean;
+  animalFull: boolean;
   /** When true, that alert stays on screen until it is closed. */
   manualDismiss: Record<NotificationChannel, boolean>;
   fillThreshold: number;
+  /** Seeders, sprayers, spreaders, and animal food and water. */
+  emptyThreshold: number;
   /** Master switch. Off keeps every alert silent. */
   soundEnabled: boolean;
   defaultSound: NotificationSoundId;
@@ -60,36 +83,58 @@ export type AppSettings = {
 export const DEFAULT_MANUAL_DISMISS: Record<NotificationChannel, boolean> = {
   combineFull: true,
   trailerFull: true,
+  seederEmpty: true,
+  sprayerEmpty: true,
+  fertilizerEmpty: true,
+  slurryEmpty: true,
+  manureEmpty: true,
   adArrived: true,
   adStuck: true,
   adProblem: true,
   cpFinished: true,
   productionMissing: true,
   productionFull: true,
+  animalMissing: true,
+  animalFull: true,
 };
 
 export const DEFAULT_CHANNEL_SOUNDS: Record<NotificationChannel, NotificationSoundChoice> = {
   combineFull: "default",
   trailerFull: "default",
+  seederEmpty: "default",
+  sprayerEmpty: "default",
+  fertilizerEmpty: "default",
+  slurryEmpty: "default",
+  manureEmpty: "default",
   adArrived: "default",
   adStuck: "default",
   adProblem: "default",
   cpFinished: "default",
   productionMissing: "default",
   productionFull: "default",
+  animalMissing: "default",
+  animalFull: "default",
 };
 
 export const DEFAULT_NOTIFICATIONS: NotificationSettings = {
   combineFull: true,
   trailerFull: true,
+  seederEmpty: true,
+  sprayerEmpty: true,
+  fertilizerEmpty: true,
+  slurryEmpty: true,
+  manureEmpty: true,
   adArrived: true,
   adStuck: true,
   adProblem: true,
   cpFinished: true,
   productionMissing: true,
   productionFull: true,
+  animalMissing: true,
+  animalFull: true,
   manualDismiss: { ...DEFAULT_MANUAL_DISMISS },
   fillThreshold: 90,
+  emptyThreshold: 10,
   soundEnabled: false,
   defaultSound: "chime",
   sounds: { ...DEFAULT_CHANNEL_SOUNDS },
@@ -114,6 +159,12 @@ function clampThreshold(value: unknown) {
   const n = typeof value === "number" ? value : DEFAULT_NOTIFICATIONS.fillThreshold;
   if (!Number.isFinite(n)) return DEFAULT_NOTIFICATIONS.fillThreshold;
   return Math.min(100, Math.max(50, Math.round(n)));
+}
+
+function clampEmptyThreshold(value: unknown) {
+  const n = typeof value === "number" ? value : DEFAULT_NOTIFICATIONS.emptyThreshold;
+  if (!Number.isFinite(n)) return DEFAULT_NOTIFICATIONS.emptyThreshold;
+  return Math.min(50, Math.max(5, Math.round(n)));
 }
 
 function sanitizeColors(value: unknown): MachineColors {
@@ -155,6 +206,7 @@ function sanitizeNotifications(value: unknown): NotificationSettings {
     }
   }
   notifications.fillThreshold = clampThreshold(record.fillThreshold);
+  notifications.emptyThreshold = clampEmptyThreshold(record.emptyThreshold);
   if (typeof record.soundEnabled === "boolean") notifications.soundEnabled = record.soundEnabled;
   if (isSoundId(record.defaultSound)) notifications.defaultSound = record.defaultSound;
   const sounds = record.sounds;

@@ -330,7 +330,14 @@ function weatherView(weather: Weather) {
 }
 
 function fillView(fill: ProductionFill) {
-  return { name: fill.name, fillLevel: fill.fillLevel, capacity: fill.capacity };
+  return {
+    name: fill.name,
+    fillLevel: fill.fillLevel,
+    capacity: fill.capacity,
+    ...(fill.fillType ? { fillType: fill.fillType } : {}),
+    ...(fill.role ? { role: fill.role } : {}),
+    ...(fill.usage ? { usage: fill.usage } : {}),
+  };
 }
 
 function productionView(production: Production) {
@@ -338,7 +345,11 @@ function productionView(production: Production) {
     id: production.id,
     name: production.name,
     status: production.status,
-    lines: (production.lines ?? []).map((line) => ({ name: line.name, status: line.status })),
+    lines: (production.lines ?? []).map((line) => ({
+      name: line.name,
+      status: line.status,
+      ...(line.enabled === false ? { enabled: false } : {}),
+    })),
     inputs: production.inputs.map(fillView),
     outputs: production.outputs.map(fillView),
   };

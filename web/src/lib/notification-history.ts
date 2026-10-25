@@ -16,12 +16,19 @@ const MAX_HISTORY = 200;
 const CHANNELS = new Set<ToastChannel>([
   "combineFull",
   "trailerFull",
+  "seederEmpty",
+  "sprayerEmpty",
+  "fertilizerEmpty",
+  "slurryEmpty",
+  "manureEmpty",
   "adArrived",
   "adStuck",
   "adProblem",
   "cpFinished",
   "productionMissing",
   "productionFull",
+  "animalMissing",
+  "animalFull",
 ]);
 
 function isEntry(value: unknown): value is HistoryEntry {

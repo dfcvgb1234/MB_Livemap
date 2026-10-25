@@ -80,12 +80,19 @@ const DEFAULT_COLORS: Record<ColorKey, string> = {
 const NOTIFICATION_CHANNELS = [
   "combineFull",
   "trailerFull",
+  "seederEmpty",
+  "sprayerEmpty",
+  "fertilizerEmpty",
+  "slurryEmpty",
+  "manureEmpty",
   "adArrived",
   "adStuck",
   "adProblem",
   "cpFinished",
   "productionMissing",
   "productionFull",
+  "animalMissing",
+  "animalFull",
 ] as const;
 
 type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
@@ -100,14 +107,22 @@ type NotificationSoundChoice = "default" | "none" | NotificationSoundId;
 type NotificationSettings = {
   combineFull: boolean;
   trailerFull: boolean;
+  seederEmpty: boolean;
+  sprayerEmpty: boolean;
+  fertilizerEmpty: boolean;
+  slurryEmpty: boolean;
+  manureEmpty: boolean;
   adArrived: boolean;
   adStuck: boolean;
   adProblem: boolean;
   cpFinished: boolean;
   productionMissing: boolean;
   productionFull: boolean;
+  animalMissing: boolean;
+  animalFull: boolean;
   manualDismiss: Record<NotificationChannel, boolean>;
   fillThreshold: number;
+  emptyThreshold: number;
   soundEnabled: boolean;
   defaultSound: NotificationSoundId;
   sounds: Record<NotificationChannel, NotificationSoundChoice>;
@@ -192,12 +207,19 @@ function defaultManualDismiss(): Record<NotificationChannel, boolean> {
   return {
     combineFull: true,
     trailerFull: true,
+    seederEmpty: true,
+    sprayerEmpty: true,
+    fertilizerEmpty: true,
+    slurryEmpty: true,
+    manureEmpty: true,
     adArrived: true,
     adStuck: true,
     adProblem: true,
     cpFinished: true,
     productionMissing: true,
     productionFull: true,
+    animalMissing: true,
+    animalFull: true,
   };
 }
 
@@ -205,12 +227,19 @@ function defaultChannelSounds(): Record<NotificationChannel, NotificationSoundCh
   return {
     combineFull: "default",
     trailerFull: "default",
+    seederEmpty: "default",
+    sprayerEmpty: "default",
+    fertilizerEmpty: "default",
+    slurryEmpty: "default",
+    manureEmpty: "default",
     adArrived: "default",
     adStuck: "default",
     adProblem: "default",
     cpFinished: "default",
     productionMissing: "default",
     productionFull: "default",
+    animalMissing: "default",
+    animalFull: "default",
   };
 }
 
@@ -222,14 +251,22 @@ export function defaultSettings(): StoredSettings {
     notifications: {
       combineFull: true,
       trailerFull: true,
+      seederEmpty: true,
+      sprayerEmpty: true,
+      fertilizerEmpty: true,
+      slurryEmpty: true,
+      manureEmpty: true,
       adArrived: true,
       adStuck: true,
       adProblem: true,
       cpFinished: true,
       productionMissing: true,
       productionFull: true,
+      animalMissing: true,
+      animalFull: true,
       manualDismiss: defaultManualDismiss(),
       fillThreshold: 90,
+      emptyThreshold: 10,
       soundEnabled: false,
       defaultSound: "chime",
       sounds: defaultChannelSounds(),
@@ -269,6 +306,12 @@ function clampThreshold(value: unknown) {
   return Math.min(100, Math.max(50, Math.round(n)));
 }
 
+function clampEmptyThreshold(value: unknown) {
+  const n = typeof value === "number" ? value : 10;
+  if (!Number.isFinite(n)) return 10;
+  return Math.min(50, Math.max(5, Math.round(n)));
+}
+
 function isSoundId(value: unknown): value is NotificationSoundId {
   return typeof value === "string" && (NOTIFICATION_SOUNDS as readonly string[]).includes(value);
 }
@@ -282,14 +325,22 @@ function sanitizeNotifications(value: unknown): NotificationSettings {
   const notifications: NotificationSettings = {
     combineFull: true,
     trailerFull: true,
+    seederEmpty: true,
+    sprayerEmpty: true,
+    fertilizerEmpty: true,
+    slurryEmpty: true,
+    manureEmpty: true,
     adArrived: true,
     adStuck: true,
     adProblem: true,
     cpFinished: true,
     productionMissing: true,
     productionFull: true,
+    animalMissing: true,
+    animalFull: true,
     manualDismiss: defaultManualDismiss(),
     fillThreshold: 90,
+    emptyThreshold: 10,
     soundEnabled: false,
     defaultSound: "chime",
     sounds: defaultChannelSounds(),
@@ -307,6 +358,7 @@ function sanitizeNotifications(value: unknown): NotificationSettings {
     }
   }
   notifications.fillThreshold = clampThreshold(record.fillThreshold);
+  notifications.emptyThreshold = clampEmptyThreshold(record.emptyThreshold);
   if (typeof record.soundEnabled === "boolean") notifications.soundEnabled = record.soundEnabled;
   if (isSoundId(record.defaultSound)) notifications.defaultSound = record.defaultSound;
   const sounds = record.sounds;

@@ -139,15 +139,25 @@ export type FieldPointSample = Pick<
   | "precisionFarming"
 >;
 
+export type FillUsage = "food" | "water" | "straw" | "product";
+
 export type ProductionFill = {
   name: string;
   fillLevel: number | null;
   capacity: number | null;
+  /** Internal Giants fill type, such as SEEDS or LIQUIDMANURE. */
+  fillType?: string;
+  /** Animal pens mark food and water as input, and milk, manure, and pallets as output. */
+  role?: "input" | "output";
+  /** Animal pens: which tank this is, so alerts stay correct in any language. */
+  usage?: FillUsage;
 };
 
 export type ProductionLine = {
   name: string;
   status: string | null;
+  /** False when the player has switched this recipe off. */
+  enabled?: boolean;
 };
 
 export type Production = {

@@ -129,6 +129,25 @@ local function fillTypeName(fillTypeIndex)
     return labelFromValue(internal)
 end
 
+local function fillTypeInternalName(fillTypeIndex)
+    if type(fillTypeIndex) ~= "number" or g_fillTypeManager == nil then
+        return nil
+    end
+    if FillType ~= nil and fillTypeIndex == FillType.UNKNOWN then
+        return nil
+    end
+    local internal = safeCall(function()
+        if g_fillTypeManager.getFillTypeNameByIndex ~= nil then
+            return g_fillTypeManager:getFillTypeNameByIndex(fillTypeIndex)
+        end
+        return nil
+    end, nil)
+    if type(internal) ~= "string" or internal == "" or string.lower(internal) == "unknown" then
+        return nil
+    end
+    return internal
+end
+
 local function fruitNameFromIndex(index)
     if type(index) ~= "number" or index <= 0 or g_fruitTypeManager == nil then
         return nil
@@ -1739,6 +1758,7 @@ function StateCollector.new()
     self.boundaryStore = {}
     self.boundaryStoreLoaded = false
     self.boundaryKeyLoaded = nil
+    self.boundaryBoundKey = nil
     return self
 end
 
@@ -1798,11 +1818,16 @@ local function appendVehicleFills(fills, vehicle, sourceName)
                 if sourceName ~= nil and sourceName ~= "" then
                     title = sourceName .. " · " .. title
                 end
-                fills[#fills + 1] = {
+                local entry = {
                     name = title,
                     fillLevel = level,
                     capacity = capacity,
                 }
+                local internal = fillTypeInternalName(fillType)
+                if internal ~= nil then
+                    entry.fillType = internal
+                end
+                fills[#fills + 1] = entry
             end
         end
     end
@@ -3391,6 +3416,7 @@ local function polygonCentroid(points)
     return x / #points, z / #points
 end
 
+-- Polygon cache only lives for this session, so the scene node id is enough.
 local function fieldCacheKey(field, id)
     return tostring((type(field) == "table" and (field.fieldId or field.rootNode)) or id)
 end
@@ -3436,6 +3462,105 @@ local function ringsOverlap(old, newRing, newPoints)
     return false
 end
 
+local function normalizeDir(value)
+    if type(value) ~= "string" or value == "" then
+        return ""
+    end
+    local text = value:gsub("\\", "/")
+    return (text:gsub("/+$", ""))
+end
+
+local function directorySlot(value)
+    local normal = normalizeDir(value)
+    if normal == "" then
+        return ""
+    end
+    return normal:match("([^/]+)$") or normal
+end
+
+-- savegame3 and a bare slot index 3 name the same career. Other folder names stay distinct.
+local function slotToken(value)
+    local slot = directorySlot(value)
+    local number = slot:match("^savegame(%d+)$") or slot:match("^slot(%d+)$")
+    if number ~= nil then
+        return number
+    end
+    if slot:match("^%d+$") then
+        return slot
+    end
+    return slot:lower()
+end
+
+local function splitBoundaryKey(key)
+    if type(key) ~= "string" then
+        return "", ""
+    end
+    local sep = key:match("^.*()|")
+    if sep == nil then
+        return key, ""
+    end
+    return key:sub(1, sep - 1), key:sub(sep + 1)
+end
+
+local function sameBoundarySave(storedSave, saveDir)
+    if saveDir == "" or storedSave == "" then
+        return false
+    end
+    if normalizeDir(storedSave):lower() == normalizeDir(saveDir):lower() then
+        return true
+    end
+    return slotToken(storedSave) == slotToken(saveDir)
+end
+
+local function fieldsInsideRing(points, centers)
+    local inside = {}
+    if type(points) ~= "table" then
+        return inside
+    end
+    local cx, cz = polygonCentroid(points)
+    for _, field in ipairs(centers) do
+        local number = tonumber(field.id)
+        if number ~= nil and number > 0 and number < 10000 and pointInPolygon(field.x, field.z, points) then
+            local dx = field.x - cx
+            local dz = field.z - cz
+            inside[#inside + 1] = { id = field.id, dist = dx * dx + dz * dz }
+        end
+    end
+    table.sort(inside, function(a, b)
+        return a.dist < b.dist
+    end)
+    return inside
+end
+
+local function ringIdsCurrent(ring, known)
+    if type(ring.synthetic) == "string" and ring.owner == nil then
+        return true
+    end
+    if type(ring.owner) ~= "string" or known[ring.owner] ~= true then
+        return false
+    end
+    if type(ring.hidden) == "table" then
+        for _, id in ipairs(ring.hidden) do
+            if known[id] ~= true then
+                return false
+            end
+        end
+    end
+    return true
+end
+
+local function ringsCoverSameGround(a, b)
+    if type(b) == "table" and ringsOverlap(a, b, b.points) then
+        return true
+    end
+    if type(a) ~= "table" or type(a.points) ~= "table" or type(b) ~= "table" or type(b.points) ~= "table" then
+        return false
+    end
+    local ax, az = polygonCentroid(a.points)
+    local bx, bz = polygonCentroid(b.points)
+    return pointInPolygon(ax, az, b.points) or pointInPolygon(bx, bz, a.points)
+end
+
 function StateCollector:boundariesFile()
     if getUserProfileAppPath == nil then
         return nil
@@ -3455,9 +3580,9 @@ function StateCollector:boundariesFile()
     return dir .. "fieldBoundaries.xml"
 end
 
-function StateCollector:boundaryKey()
+function StateCollector:boundaryKeyParts()
     local mapName = ""
-    local saveName = ""
+    local saveDir = ""
     local info = g_currentMission and g_currentMission.missionInfo
     if type(info) == "table" then
         if type(info.mapTitle) == "string" and info.mapTitle ~= "" then
@@ -3465,33 +3590,75 @@ function StateCollector:boundaryKey()
         elseif type(info.mapId) == "string" then
             mapName = info.mapId
         end
+        -- The map folder is the same for every career on that map, so it cannot identify a save.
         if type(info.savegameDirectory) == "string" and info.savegameDirectory ~= "" then
-            saveName = info.savegameDirectory
+            saveDir = normalizeDir(info.savegameDirectory)
         elseif info.savegameIndex ~= nil then
-            saveName = tostring(info.savegameIndex)
+            saveDir = "slot" .. tostring(info.savegameIndex)
         end
     end
     if mapName == "" and type(self.mapName) == "string" then
         mapName = self.mapName
     end
-    if saveName == "" and type(self.missionDirectory) == "string" then
-        saveName = self.missionDirectory
-    end
-    return mapName .. "|" .. saveName
+    return mapName .. "|" .. saveDir, mapName, saveDir
 end
 
-function StateCollector:readBoundaryStore()
+function StateCollector:boundaryKey()
+    local key = self:boundaryKeyParts()
+    return key
+end
+
+function StateCollector:saveBoundaryFile(saveDir)
+    if type(saveDir) ~= "string" or saveDir == "" then
+        return nil
+    end
+    return saveDir .. "/mbLivemap_fieldBoundaries.xml"
+end
+
+-- Move outlines saved under an older path spelling onto the current save key.
+function StateCollector:adoptBoundaryKey(canonical, mapName, saveDir)
+    local store = self.boundaryStore
+    if type(store) ~= "table" or mapName == "" or saveDir == "" or store[canonical] ~= nil then
+        return canonical, false
+    end
+    local found = nil
+    local foundCount = -1
+    local aliases = {}
+    for key, rings in pairs(store) do
+        if key ~= canonical and type(rings) == "table" and #rings > 0 then
+            local keyMap, keySave = splitBoundaryKey(key)
+            if keyMap == mapName and sameBoundarySave(keySave, saveDir) then
+                aliases[#aliases + 1] = key
+                if #rings > foundCount then
+                    found = key
+                    foundCount = #rings
+                end
+            end
+        end
+    end
+    if found == nil then
+        return canonical, false
+    end
+    store[canonical] = store[found]
+    for _, key in ipairs(aliases) do
+        store[key] = nil
+    end
+    return canonical, true
+end
+
+function StateCollector:readBoundaryStore(path)
     local store = {}
-    local path = self:boundariesFile()
+    path = path or self:boundariesFile()
     if path == nil or XMLFile == nil or XMLFile.loadIfExists == nil then
-        return store
+        return nil
     end
     local xmlFile = nil
     local loaded = pcall(function()
-        xmlFile = XMLFile.loadIfExists("mbLivemapBoundaries", path)
+        StateCollector.boundaryXmlSeq = (StateCollector.boundaryXmlSeq or 0) + 1
+        xmlFile = XMLFile.loadIfExists("mbLivemapBoundaries" .. tostring(StateCollector.boundaryXmlSeq), path)
     end)
     if not loaded or xmlFile == nil then
-        return store
+        return nil
     end
     pcall(function()
         xmlFile:iterate("fieldBoundaries.save", function(_, saveKey)
@@ -3545,16 +3712,38 @@ function StateCollector:readBoundaryStore()
     return store
 end
 
-function StateCollector:writeBoundaryStore()
-    local path = self:boundariesFile()
-    if path == nil or type(io) ~= "table" or type(io.open) ~= "function" then
+function StateCollector:readSaveRings(saveDir)
+    local path = self:saveBoundaryFile(saveDir)
+    if path == nil then
+        return nil
+    end
+    local store = self:readBoundaryStore(path)
+    if store == nil then
+        return nil
+    end
+    local key = self:boundaryKey()
+    if type(store[key]) == "table" then
+        return store[key]
+    end
+    for _, rings in pairs(store) do
+        if type(rings) == "table" then
+            return rings
+        end
+    end
+    return {}
+end
+
+function StateCollector:writeBoundaryXml(path, store)
+    if path == nil or type(io) ~= "table" or type(io.open) ~= "function" or type(store) ~= "table" then
         return
     end
     local lines = {
         '<?xml version="1.0" encoding="utf-8" standalone="no"?>',
         "<fieldBoundaries>",
     }
-    for key, rings in pairs(self.boundaryStore or {}) do
+    for key, rings in pairs(store) do
+        local _, savePart = splitBoundaryKey(key)
+        if savePart ~= "" and type(rings) == "table" then
         lines[#lines + 1] = string.format('    <save key="%s">', xmlEscape(key))
         for _, ring in ipairs(rings) do
             if ring.owner ~= nil then
@@ -3576,6 +3765,7 @@ function StateCollector:writeBoundaryStore()
             lines[#lines + 1] = "        </ring>"
         end
         lines[#lines + 1] = "    </save>"
+        end
     end
     lines[#lines + 1] = "</fieldBoundaries>"
     lines[#lines + 1] = ""
@@ -3587,16 +3777,41 @@ function StateCollector:writeBoundaryStore()
     handle:close()
 end
 
+function StateCollector:writeBoundaryStore()
+    local path = self:boundariesFile()
+    if path ~= nil then
+        self:writeBoundaryXml(path, self.boundaryStore or {})
+    end
+    local _, _, saveDir = self:boundaryKeyParts()
+    local key = self.boundaryKeyLoaded
+    local rings = type(key) == "string" and self.boundaryStore and self.boundaryStore[key] or nil
+    local saveFile = self:saveBoundaryFile(saveDir)
+    if saveFile ~= nil and type(rings) == "table" then
+        self:writeBoundaryXml(saveFile, { [key] = rings })
+    end
+end
+
 function StateCollector:ensureBoundaries()
     if not self.boundaryStoreLoaded then
-        self.boundaryStore = self:readBoundaryStore()
+        self.boundaryStore = self:readBoundaryStore() or {}
         self.boundaryStoreLoaded = true
     end
-    local key = self:boundaryKey()
-    if self.boundaryKeyLoaded ~= key then
-        self.boundaryKeyLoaded = key
-        self.boundaryRings = self.boundaryStore[key] or {}
-        self.boundaryStore[key] = self.boundaryRings
+    local key, mapName, saveDir = self:boundaryKeyParts()
+    if self.boundaryKeyLoaded == key then
+        return
+    end
+    local adopted, migrated = self:adoptBoundaryKey(key, mapName, saveDir)
+    local fromSave = self:readSaveRings(saveDir)
+    if fromSave ~= nil then
+        self.boundaryStore[adopted] = fromSave
+        migrated = false
+    end
+    self.boundaryKeyLoaded = adopted
+    self.boundaryRings = self.boundaryStore[adopted] or {}
+    self.boundaryBoundKey = nil
+    if migrated then
+        self.boundaryStore[adopted] = self.boundaryRings
+        self:writeBoundaryStore()
     end
 end
 
@@ -3642,18 +3857,111 @@ function StateCollector:fieldCenters()
                 fx, fz = field.posX, field.posZ
             end
             if type(fx) == "number" and type(fz) == "number" then
-                centers[#centers + 1] = { id = fieldCacheKey(field, id), x = fx, z = fz }
+                centers[#centers + 1] = { id = fieldDisplayId(field, id), x = fx, z = fz }
             end
         end
     end
     return centers
 end
 
+-- Scene node ids change whenever the save loads. Keep each outline on the field number,
+-- and drop older scans of the same ground.
+function StateCollector:bindBoundaryRings()
+    self:ensureBoundaries()
+    if self.boundaryBoundKey == self.boundaryKeyLoaded then
+        return
+    end
+    local centers = self:fieldCenters()
+    if #centers == 0 then
+        return
+    end
+    local known = {}
+    local stableCenters = false
+    for _, field in ipairs(centers) do
+        known[field.id] = true
+        local number = tonumber(field.id)
+        if number ~= nil and number > 0 and number < 10000 then
+            stableCenters = true
+        end
+    end
+    -- Wait until field numbers exist. Node ids from this load would be stale after the next reload.
+    if not stableCenters then
+        return
+    end
+    local changed = false
+    local rebound = {}
+    for _, source in ipairs(self.boundaryRings or {}) do
+        local hidden = {}
+        for _, id in ipairs(source.hidden or {}) do
+            hidden[#hidden + 1] = id
+        end
+        local ring = {
+            owner = source.owner,
+            synthetic = source.synthetic,
+            cx = source.cx,
+            cz = source.cz,
+            points = source.points,
+            hidden = hidden,
+        }
+        if not ringIdsCurrent(ring, known) and type(ring.points) == "table" then
+            local inside = fieldsInsideRing(ring.points, centers)
+            if #inside == 0 then
+                local cx, cz = polygonCentroid(ring.points)
+                ring.owner = nil
+                ring.synthetic = string.format("scan:%d:%d", math.floor(cx + 0.5), math.floor(cz + 0.5))
+                ring.cx = round1(cx)
+                ring.cz = round1(cz)
+                ring.hidden = {}
+            else
+                ring.owner = inside[1].id
+                ring.synthetic = nil
+                ring.cx = nil
+                ring.cz = nil
+                hidden = {}
+                for index = 2, #inside do
+                    hidden[#hidden + 1] = inside[index].id
+                end
+                ring.hidden = hidden
+            end
+            changed = true
+        end
+        rebound[#rebound + 1] = ring
+    end
+    local kept = {}
+    for index = #rebound, 1, -1 do
+        local ring = rebound[index]
+        local covered = false
+        for _, newer in ipairs(kept) do
+            if ringsCoverSameGround(ring, newer) then
+                covered = true
+                break
+            end
+        end
+        if not covered then
+            table.insert(kept, 1, ring)
+        else
+            changed = true
+        end
+    end
+    self.boundaryBoundKey = self.boundaryKeyLoaded
+    if not changed then
+        return
+    end
+    self.boundaryRings = kept
+    if type(self.boundaryKeyLoaded) == "string" then
+        self.boundaryStore[self.boundaryKeyLoaded] = kept
+        self:writeBoundaryStore()
+    end
+    if Logging ~= nil and Logging.info ~= nil then
+        Logging.info("[MB Livemap] field boundaries restored %d", #kept)
+    end
+end
+
 function StateCollector:commitScan(points, clickX, clickZ, interiorX, interiorZ)
     if type(points) ~= "table" then
         return false, "Could not trace the field edge"
     end
-    self:ensureBoundaries()
+    self:bindBoundaryRings()
     local simplified = simplifyPolygon(points)
     if simplified == nil then
         return false, "Field outline was too small"
@@ -3671,7 +3979,8 @@ function StateCollector:commitScan(points, clickX, clickZ, interiorX, interiorZ)
 
     local inside = {}
     for _, field in ipairs(self:fieldCenters()) do
-        if pointInPolygon(field.x, field.z, rounded) then
+        local number = tonumber(field.id)
+        if number ~= nil and number > 0 and number < 10000 and pointInPolygon(field.x, field.z, rounded) then
             local dx = field.x - (clickX or field.x)
             local dz = field.z - (clickZ or field.z)
             inside[#inside + 1] = { id = field.id, dist = dx * dx + dz * dz }
@@ -3740,7 +4049,7 @@ function StateCollector:collectFields()
         local weedsEnabled = missionFlag({ "weedsEnabled", "weedsRequired" })
         local stonesEnabled = missionFlag({ "stonesEnabled", "stonesRequired" })
         local sprayMax = fertilizerApplicationsMax()
-        self:ensureBoundaries()
+        self:bindBoundaryRings()
         local scannedPolygons, hiddenScans = self:boundaryLookups()
 
         for id, field in pairs(fieldList) do
@@ -3924,13 +4233,13 @@ function StateCollector:collectFields()
             if precision ~= nil then
                 entry.precisionFarming = precision
             end
-            if scannedPolygons[cacheKey] ~= nil then
-                entry.polygon = scannedPolygons[cacheKey]
-                local measured = polygonAreaHa(scannedPolygons[cacheKey])
+            if scannedPolygons[displayId] ~= nil then
+                entry.polygon = scannedPolygons[displayId]
+                local measured = polygonAreaHa(scannedPolygons[displayId])
                 if measured ~= nil then
                     entry.areaHa = measured
                 end
-            elseif hiddenScans[cacheKey] then
+            elseif hiddenScans[displayId] then
                 entry.polygon = nil
             end
             fields[#fields + 1] = entry
@@ -4029,7 +4338,7 @@ local function eachProduction(point, visitor)
     end
 end
 
-local function addFill(fills, title, level, capacity)
+local function addFill(fills, title, level, capacity, usage)
     if title == nil or title == "" then
         return
     end
@@ -4042,17 +4351,26 @@ local function addFill(fills, title, level, capacity)
         if fill.name == title then
             fill.fillLevel = (fill.fillLevel or 0) + level
             fill.capacity = math.max(fill.capacity or 0, capacity)
+            if fill.usage == nil and type(usage) == "string" then
+                fill.usage = usage
+                fill.role = usage == "product" and "output" or "input"
+            end
             return
         end
     end
-    fills[#fills + 1] = {
+    local entry = {
         name = title,
         fillLevel = level,
         capacity = capacity,
     }
+    if type(usage) == "string" then
+        entry.usage = usage
+        entry.role = usage == "product" and "output" or "input"
+    end
+    fills[#fills + 1] = entry
 end
 
-local function pushHusbandryFill(fills, placeable, fillType)
+local function pushHusbandryFill(fills, placeable, fillType, usage)
     if fillType == nil or placeable.getHusbandryFillLevel == nil then
         return
     end
@@ -4065,7 +4383,7 @@ local function pushHusbandryFill(fills, placeable, fillType)
             return placeable:getHusbandryCapacity(fillType)
         end, 0) or 0
     end
-    addFill(fills, fillTypeName(fillType), level, capacity)
+    addFill(fills, fillTypeName(fillType), level, capacity, usage)
 end
 
 function StateCollector:collectProductions()
@@ -4110,12 +4428,14 @@ function StateCollector:collectProductions()
                             elseif production.enabled == true then
                                 lineStatus = "RUNNING"
                             end
+                            local enabled = production.enabled ~= false and production.disabled ~= true and production.isEnabled ~= false
                             if lineStatus == "RUNNING" then
                                 anyRunning = true
                             end
                             lines[#lines + 1] = {
                                 name = lineName,
                                 status = lineStatus,
+                                enabled = enabled,
                             }
                         end
                     end)
@@ -4313,44 +4633,44 @@ function StateCollector:collectAnimals()
                                     if type(foodGroup.productionWeight) == "number" then
                                         title = string.format("%s (%d%%)", title, math.floor(foodGroup.productionWeight * 100 + 0.5))
                                     end
-                                    addFill(fills, title, level, food.capacity or 0)
+                                    addFill(fills, title, level, food.capacity or 0, "food")
                                     wroteGroup = true
                                 end
                             end
                         end
                         if not wroteGroup and type(food.fillLevels) == "table" then
                             for fillType, level in pairs(food.fillLevels) do
-                                addFill(fills, fillTypeName(fillType), level, food.capacity or 0)
+                                addFill(fills, fillTypeName(fillType), level, food.capacity or 0, "food")
                             end
                         end
                     end
 
                     local water = placeable.spec_husbandryWater
                     if water ~= nil then
-                        pushHusbandryFill(fills, placeable, water.fillType)
+                        pushHusbandryFill(fills, placeable, water.fillType, "water")
                     end
 
                     local straw = placeable.spec_husbandryStraw
                     if straw ~= nil then
-                        pushHusbandryFill(fills, placeable, straw.inputFillType)
+                        pushHusbandryFill(fills, placeable, straw.inputFillType, "straw")
                         local manureActive = straw.isManureActive
                         if manureActive == nil then
                             manureActive = placeable.isManureActive
                         end
                         if manureActive ~= false then
-                            pushHusbandryFill(fills, placeable, straw.outputFillType)
+                            pushHusbandryFill(fills, placeable, straw.outputFillType, "product")
                         end
                     end
 
                     local liquidManure = placeable.spec_husbandryLiquidManure
                     if liquidManure ~= nil then
-                        pushHusbandryFill(fills, placeable, liquidManure.fillType)
+                        pushHusbandryFill(fills, placeable, liquidManure.fillType, "product")
                     end
 
                     local milk = placeable.spec_husbandryMilk
                     if milk ~= nil and type(milk.fillTypes) == "table" then
                         for _, fillType in ipairs(milk.fillTypes) do
-                            pushHusbandryFill(fills, placeable, fillType)
+                            pushHusbandryFill(fills, placeable, fillType, "product")
                         end
                     end
 
@@ -4368,7 +4688,7 @@ function StateCollector:collectAnimals()
                             if type(pallets.capacities) == "table" then
                                 palletCapacity = pallets.capacities[fillType] or 0
                             end
-                            addFill(fills, fillTypeName(fillType), pallets.fillLevels[fillType], palletCapacity)
+                            addFill(fills, fillTypeName(fillType), pallets.fillLevels[fillType], palletCapacity, "product")
                         end
                     end
 

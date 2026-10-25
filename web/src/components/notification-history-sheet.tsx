@@ -16,12 +16,19 @@ import { cn } from "@/lib/utils";
 const CHANNEL_LABEL: Record<ToastChannel, string> = {
   combineFull: "Combine",
   trailerFull: "Trailer",
+  seederEmpty: "Seeder",
+  sprayerEmpty: "Sprayer",
+  fertilizerEmpty: "Fertilizer",
+  slurryEmpty: "Slurry",
+  manureEmpty: "Manure",
   adArrived: "Arrived",
   adStuck: "Stuck",
   adProblem: "AutoDrive",
   cpFinished: "Courseplay",
   productionMissing: "Production",
   productionFull: "Production",
+  animalMissing: "Animals",
+  animalFull: "Animals",
 };
 
 const LEVEL_CLASS = {

@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  HideDisabledLinesButton,
+  disabledProductionCount,
+  isDisabledProductionLine,
+  productionLineLabel,
+  productionLineTone,
+  useHiddenProductionLines,
+} from "@/components/production-lines";
 import type { AnimalHusbandry, Production, ProductionFill } from "@/lib/types";
 
 function formatAmount(value: number | null) {
@@ -39,26 +47,26 @@ function FillList({ fills }: { fills: ProductionFill[] }) {
   );
 }
 
-const LINE_LABELS: Record<string, string> = {
-  RUNNING: "Running",
-  MISSING_INPUTS: "Needs inputs",
-  NO_OUTPUT_SPACE: "Storage full",
-  INACTIVE: "Off",
-  active: "Running",
-  idle: "Off",
-};
+const TONE_CLASS = {
+  ok: "text-[#8fb56a]",
+  warn: "text-[#e2b657]",
+  full: "text-[#d9783c]",
+  muted: "text-[#b7b1a4]",
+} as const;
 
 function statusClass(status: string | null) {
   const value = (status ?? "").toUpperCase();
-  if (value === "RUNNING" || value === "ACTIVE") return "text-[#8fb56a]";
-  if (value === "MISSING_INPUTS") return "text-[#e2b657]";
-  if (value === "NO_OUTPUT_SPACE") return "text-[#d9783c]";
-  return "text-[#b7b1a4]";
+  if (value === "RUNNING" || value === "ACTIVE") return TONE_CLASS.ok;
+  if (value === "MISSING_INPUTS") return TONE_CLASS.warn;
+  if (value === "NO_OUTPUT_SPACE") return TONE_CLASS.full;
+  return TONE_CLASS.muted;
 }
 
 function statusLabel(status: string | null) {
+  if (status === "active") return "Running";
+  if (status === "idle") return "Off";
   if (!status) return "Unknown";
-  return LINE_LABELS[status] ?? LINE_LABELS[status.toUpperCase()] ?? status;
+  return status;
 }
 
 function displayName(value: string | null | undefined) {
@@ -74,6 +82,7 @@ function displayName(value: string | null | undefined) {
 
 export function ProductionCards({ productions }: { productions: Production[] }) {
   const owned = productions.filter((point) => point.status !== "unowned");
+  const hiddenLines = useHiddenProductionLines();
   return (
     <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
       <h2 className="text-[15px] font-semibold tracking-[0.04em] uppercase">Productions</h2>
@@ -82,21 +91,38 @@ export function ProductionCards({ productions }: { productions: Production[] }) 
       ) : (
         owned.map((point) => {
           const lines = point.lines ?? [];
+          const disabledCount = disabledProductionCount(lines);
+          const hideDisabled = hiddenLines.hides(point.id);
+          const shown = hideDisabled ? lines.filter((line) => !isDisabledProductionLine(line)) : lines;
           const fills = [...point.inputs, ...point.outputs];
           return (
             <article key={point.id} className="border-t border-white/10 py-2.5 first:border-t-0 first:pt-2">
-              <div className="mb-1 flex items-baseline justify-between gap-2.5">
+              <div className="mb-1 flex items-center justify-between gap-2.5">
                 <strong>{point.name}</strong>
-                {lines.length === 0 ? (
-                  <span className={`text-[13px] ${statusClass(point.status)}`}>{statusLabel(point.status)}</span>
-                ) : null}
+                <span className="flex items-center gap-1.5">
+                  {disabledCount > 0 ? (
+                    <HideDisabledLinesButton
+                      pressed={hideDisabled}
+                      tone="dark"
+                      onToggle={() => hiddenLines.toggle(point.id)}
+                    />
+                  ) : null}
+                  {lines.length === 0 ? (
+                    <span className={`text-[13px] ${statusClass(point.status)}`}>{statusLabel(point.status)}</span>
+                  ) : null}
+                </span>
               </div>
-              {lines.map((line, index) => (
+              {shown.map((line, index) => (
                 <div key={`${line.name}-${index}`} className="mt-0.5 flex items-baseline justify-between gap-2.5 text-[13px]">
                   <span>{line.name}</span>
-                  <span className={statusClass(line.status)}>{statusLabel(line.status)}</span>
+                  <span className={TONE_CLASS[productionLineTone(line)]}>{productionLineLabel(line)}</span>
                 </div>
               ))}
+              {hideDisabled && disabledCount > 0 ? (
+                <p className="mt-1 text-[12px] text-[#b7b1a4]">
+                  {disabledCount} disabled {disabledCount === 1 ? "line" : "lines"} hidden
+                </p>
+              ) : null}
               <FillList fills={fills} />
             </article>
           );

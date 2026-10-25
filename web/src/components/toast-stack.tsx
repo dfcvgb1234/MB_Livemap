@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { useLivemapContext } from "@/components/livemap-provider";
 import { useSettings } from "@/components/settings-provider";
-import { useFillAlerts, useProductionAlerts } from "@/hooks/use-fill-alerts";
+import { useAnimalAlerts, useEmptyAlerts, useFillAlerts, useProductionAlerts } from "@/hooks/use-fill-alerts";
 import {
   loadHistory,
   prependHistory,
@@ -129,7 +129,9 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   );
 
   useFillAlerts(push);
+  useEmptyAlerts(push);
   useProductionAlerts(push);
+  useAnimalAlerts(push);
 
   useEffect(() => {
     return subscribeNotifications((note) => {
