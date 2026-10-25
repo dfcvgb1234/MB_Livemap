@@ -16,31 +16,11 @@ if not exist "server\package.json" (
   exit /b 1
 )
 
-if not exist "server\node_modules\" (
-  echo Installing bridge dependencies...
-  pushd "%~dp0..\server"
-  call npm.cmd install
-  if errorlevel 1 (
-    echo Bridge install failed.
-    popd
-    pause
-    exit /b 1
-  )
-  popd
-)
-
-if not exist "web\node_modules\" (
-  echo Installing dashboard dependencies...
-  pushd "%~dp0..\web"
-  call npm.cmd install
-  if errorlevel 1 (
-    echo Dashboard install failed.
-    popd
-    pause
-    exit /b 1
-  )
-  popd
-)
+set "DEPS_UPDATED="
+call :ensure_npm_deps "%~dp0..\server" "bridge"
+if errorlevel 1 exit /b 1
+call :ensure_npm_deps "%~dp0..\web" "dashboard"
+if errorlevel 1 exit /b 1
 
 netsh advfirewall firewall show rule name="MB Livemap Dashboard" | findstr /C:"MB Livemap Dashboard" >nul
 if errorlevel 1 (
@@ -62,6 +42,9 @@ if errorlevel 1 (
   start "MB Livemap Web" /D "%~dp0..\web" cmd /k npm.cmd run dev
 ) else (
   echo Dashboard is already running.
+  if defined DEPS_UPDATED (
+    echo Close the MB Livemap Web window and run this again so it picks up the updated Next.js.
+  )
 )
 
 echo Waiting for http://127.0.0.1:43127 ...
@@ -85,3 +68,26 @@ echo Leave the Bridge and Web windows open while you play.
 echo If the tablet cannot connect, allow the MB Livemap firewall rules for Private networks.
 echo.
 pause
+exit /b 0
+
+:ensure_npm_deps
+set "DEP_DIR=%~1"
+set "DEP_LABEL=%~2"
+if not exist "%DEP_DIR%\node_modules\.package-lock.json" goto install_npm_deps
+powershell -NoProfile -Command "exit [int]((Get-Item -LiteralPath '%DEP_DIR%\package.json').LastWriteTimeUtc -gt (Get-Item -LiteralPath '%DEP_DIR%\node_modules\.package-lock.json').LastWriteTimeUtc -or (Get-Item -LiteralPath '%DEP_DIR%\package-lock.json').LastWriteTimeUtc -gt (Get-Item -LiteralPath '%DEP_DIR%\node_modules\.package-lock.json').LastWriteTimeUtc)"
+if errorlevel 1 goto install_npm_deps
+exit /b 0
+
+:install_npm_deps
+echo Installing %DEP_LABEL% dependencies...
+pushd "%DEP_DIR%"
+call npm.cmd install
+if errorlevel 1 (
+  echo %DEP_LABEL% install failed.
+  popd
+  pause
+  exit /b 1
+)
+popd
+set "DEPS_UPDATED=1"
+exit /b 0

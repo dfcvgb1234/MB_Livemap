@@ -13,6 +13,7 @@ local ALLOWED = {
     ["courseplay.start"] = true,
     ["courseplay.stop"] = true,
     ["field.scan"] = true,
+    ["field.sample"] = true,
 }
 
 local FILL_NAME_CANDIDATES = {
@@ -131,6 +132,27 @@ function CommandHandler:startFieldScan(cmd)
         return { type = "commandResult", id = id, ok = false, error = err or "A field scan is already running" }
     end
     return nil
+end
+
+function CommandHandler:sampleField(cmd)
+    local id = cmd.id or "unknown"
+    local x = tonumber(cmd.x)
+    local z = tonumber(cmd.z)
+    if x == nil or z == nil then
+        return { type = "commandResult", id = id, ok = false, error = "Missing sample position" }
+    end
+    local bridge = self.bridge
+    if bridge == nil or bridge.collector == nil or bridge.collector.sampleFieldPoint == nil then
+        return { type = "commandResult", id = id, ok = false, error = "Field sample is not available" }
+    end
+    local sample = nil
+    local ok = pcall(function()
+        sample = bridge.collector:sampleFieldPoint(x, z)
+    end)
+    if not ok or type(sample) ~= "table" then
+        return { type = "commandResult", id = id, ok = false, error = "Could not sample this position" }
+    end
+    return { type = "commandResult", id = id, ok = true, field = sample }
 end
 
 local function localPlayer()
@@ -294,6 +316,9 @@ function CommandHandler:handle(cmd)
 
     if action == "field.scan" then
         return self:startFieldScan(cmd)
+    end
+    if action == "field.sample" then
+        return self:sampleField(cmd)
     end
 
     local vehicle = findVehicleById(cmd.vehicleId)

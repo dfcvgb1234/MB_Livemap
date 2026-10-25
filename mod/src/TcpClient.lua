@@ -345,9 +345,9 @@ function TcpClient:pollCommand()
         local cpLane = xmlFile:getString("commands#cpLane")
         local scanX = xmlFile:getString("commands#x")
         local scanZ = xmlFile:getString("commands#z")
-        local isFieldScan = action == "field.scan"
+        local isPointCommand = action == "field.scan" or action == "field.sample"
         local hasVehicle = vehicleId ~= nil and vehicleId ~= ""
-        if idStr ~= nil and idStr ~= "" and idStr ~= self.lastCommandId and action ~= nil and (hasVehicle or isFieldScan) then
+        if idStr ~= nil and idStr ~= "" and idStr ~= self.lastCommandId and action ~= nil and (hasVehicle or isPointCommand) then
             self.lastCommandId = idStr
             payload = {
                 type = "command",
@@ -355,7 +355,7 @@ function TcpClient:pollCommand()
                 action = action,
                 vehicleId = hasVehicle and vehicleId or "",
             }
-            if isFieldScan then
+            if isPointCommand then
                 payload.x = tonumber(scanX)
                 payload.z = tonumber(scanZ)
             end

@@ -7,7 +7,7 @@ import { CropCalendar } from "@/components/crop-calendar";
 import { AnimalCards, ProductionCards } from "@/components/farm-cards";
 import { VehicleSheet } from "@/components/vehicle-sheet";
 import { PlayerSheet } from "@/components/player-sheet";
-import { FieldSheet } from "@/components/field-sheet";
+import { FieldSheet, fieldFromClick, useFieldClickSample } from "@/components/field-sheet";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { useLivemapContext } from "@/components/livemap-provider";
 import { driverPageLabel } from "@/lib/driver-page";
@@ -19,7 +19,7 @@ export default function HomePage() {
   const driverLabel = driverPageLabel(autoDrive?.available === true, courseplay?.available === true);
   const [selected, setSelected] = useState<Vehicle | null>(null);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const clickSample = useFieldClickSample(sendCommand, lastResult, connection === "connected");
   const stateRef = useRef(state);
   stateRef.current = state;
 
@@ -29,9 +29,9 @@ export default function HomePage() {
     if (vehicle) {
       setSelected(vehicle);
       setSelectedPlayerId(null);
-      setSelectedFieldId(null);
+      clickSample.clear();
     }
-  }, [focus]);
+  }, [focus, clickSample.clear]);
 
   const liveSelected =
     selected == null
@@ -46,7 +46,10 @@ export default function HomePage() {
       ? null
       : (state?.farms?.find((farm) => farm.id === livePlayer.farmId) ?? null);
   const liveField =
-    selectedFieldId == null ? null : (state?.fields.find((field) => field.id === selectedFieldId) ?? null);
+    clickSample.fieldId == null
+      ? null
+      : (state?.fields.find((field) => field.id === clickSample.fieldId) ?? null);
+  const shownField = liveField == null ? null : fieldFromClick(liveField, clickSample.sample);
 
   return (
     <div className="grid min-h-full grid-cols-1 min-[1536px]:h-full min-[1536px]:min-h-0 min-[1536px]:grid-cols-[minmax(0,1fr)_minmax(520px,38vw)] min-[1536px]:overflow-hidden">
@@ -59,14 +62,14 @@ export default function HomePage() {
         onSelect={(vehicle) => {
           setSelected(vehicle);
           setSelectedPlayerId(null);
-          setSelectedFieldId(null);
+          clickSample.clear();
         }}
         onSelectPlayer={
           state?.multiplayer === true
             ? (player) => {
                 setSelected(null);
                 setSelectedPlayerId(player.id);
-                setSelectedFieldId(null);
+                clickSample.clear();
               }
             : undefined
         }
@@ -80,17 +83,17 @@ export default function HomePage() {
           onSelectVehicle={(vehicle) => {
             setSelected(vehicle);
             setSelectedPlayerId(null);
-            setSelectedFieldId(null);
+            clickSample.clear();
           }}
           onSelectPlayer={(player) => {
             setSelected(null);
             setSelectedPlayerId(player.id);
-            setSelectedFieldId(null);
+            clickSample.clear();
           }}
-          onSelectField={(field) => {
+          onSelectField={(field, point) => {
             setSelected(null);
             setSelectedPlayerId(null);
-            setSelectedFieldId(field.id);
+            clickSample.select(field, point);
           }}
           onScan={(x, z) =>
             connection === "connected" ? sendCommand("field.scan", "", undefined, { x, z }) : ""
@@ -100,7 +103,7 @@ export default function HomePage() {
       </MapSlot>
       <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1536px]:overflow-auto min-[1536px]:border-t-0 min-[1536px]:border-l">
         <ConnectionBanner connection={connection} bridgeStatus={bridgeStatus} error={error} />
-        <FieldSheet field={liveField} />
+        <FieldSheet field={shownField} sampling={clickSample.pending} />
         <PlayerSheet player={livePlayer} farm={liveFarm} />
         <VehicleSheet
           embedded

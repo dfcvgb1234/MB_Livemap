@@ -27,6 +27,7 @@ import {
   type CommandMessage,
   type CommandResult,
   type Field,
+  type FieldPointSample,
   type GameState,
   type LivemapNotification,
   type NotificationKind,
@@ -434,19 +435,65 @@ function isWhitelistAction(value: string): value is WhitelistAction {
   return WHITELIST.has(value);
 }
 
+function isPointAction(action: string) {
+  return action === "field.scan" || action === "field.sample";
+}
+
+function pointInRing(x: number, z: number, ring: Array<{ x: number; z: number }>) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const a = ring[i];
+    const b = ring[j];
+    if (!a || !b) continue;
+    const crosses = a.z > z !== b.z > z && x < ((b.x - a.x) * (z - a.z)) / (b.z - a.z || 1e-9) + a.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function mockPointSample(x: number, z: number): FieldPointSample {
+  const field = latestState.fields.find(
+    (item) => item.polygon != null && item.polygon.length >= 3 && pointInRing(x, z, item.polygon),
+  );
+  const nitrogen = Math.round((40 + ((Math.abs(x) * 3 + Math.abs(z)) % 120)) * 10) / 10;
+  const ph = Math.round((5.2 + (Math.abs(z) % 20) / 10) * 100) / 100;
+  return {
+    fruitType: field?.fruitType ?? null,
+    growthState: field?.growthState ?? null,
+    growthMax: field?.growthMax ?? null,
+    cropState: field?.cropState ?? null,
+    needsRolling: field?.needsRolling ?? null,
+    needsFertilizer: field?.needsFertilizer ?? null,
+    fertilizerLevel: field?.fertilizerLevel ?? null,
+    fertilizerMax: field?.fertilizerMax ?? null,
+    needsSpraying: field?.needsSpraying ?? null,
+    weeds: field?.weeds ?? null,
+    needsPlowing: field?.needsPlowing ?? null,
+    needsLime: field?.needsLime ?? null,
+    needsStones: field?.needsStones ?? null,
+    precisionFarming: {
+      soilType: "Loam",
+      ph,
+      phStatus: ph < 6.2 ? "Low" : ph > 7.2 ? "High" : "Optimal",
+      nitrogen,
+      nitrogenTarget: 160,
+    },
+  };
+}
+
 function commandFromBody(body: unknown): CommandMessage | { error: string } {
   if (!body || typeof body !== "object") return { error: "Invalid command" };
   const raw = body as Record<string, unknown>;
   if (typeof raw.action !== "string" || raw.action === "") return { error: "command requires action" };
   if (!isWhitelistAction(raw.action)) return { error: `Unsupported action: ${raw.action}` };
-  if (raw.action === "field.scan") {
+  if (isPointAction(raw.action)) {
     if (typeof raw.x !== "number" || typeof raw.z !== "number" || !Number.isFinite(raw.x) || !Number.isFinite(raw.z)) {
       return { error: "command requires x and z" };
     }
     return {
       type: "command",
       id: typeof raw.id === "string" && raw.id !== "" ? raw.id : randomUUID(),
-      action: "field.scan",
+      action: raw.action,
       vehicleId: typeof raw.vehicleId === "string" ? raw.vehicleId : "",
       x: raw.x,
       z: raw.z,
@@ -585,6 +632,29 @@ function handleCommand(cmd: CommandMessage, from?: WebSocket): CommandResult {
       latestState = applyMockFields(applyMockAd({ ...latestState, ts: Date.now() }));
       lastStateTs = latestState.ts;
       broadcast(latestState);
+    }
+    if (cmd.action === "field.sample") {
+      if (typeof cmd.x !== "number" || typeof cmd.z !== "number" || !Number.isFinite(cmd.x) || !Number.isFinite(cmd.z)) {
+        const result: CommandResult = {
+          type: "commandResult",
+          id: cmd.id,
+          ok: false,
+          error: "Missing sample position",
+        };
+        replyToClient(from, result);
+        broadcast(result);
+        return result;
+      }
+      const result: CommandResult = {
+        type: "commandResult",
+        id: cmd.id,
+        ok: true,
+        field: mockPointSample(cmd.x, cmd.z),
+      };
+      replyToClient(from, result);
+      broadcast(result);
+      broadcast(statusPayload());
+      return result;
     }
     if (cmd.action === "engine.start" || cmd.action === "engine.stop") {
       const on = cmd.action === "engine.start";
@@ -1022,7 +1092,7 @@ wss.on("connection", (ws, req) => {
 
     if (typed.type === "command") {
       const cmd = msg as CommandMessage;
-      if (!cmd.id || !cmd.action || (cmd.action !== "field.scan" && !cmd.vehicleId)) {
+      if (!cmd.id || !cmd.action || (!isPointAction(cmd.action) && !cmd.vehicleId)) {
         ws.send(
           JSON.stringify({
             type: "error",
@@ -1032,7 +1102,7 @@ wss.on("connection", (ws, req) => {
         return;
       }
       if (
-        cmd.action === "field.scan" &&
+        isPointAction(cmd.action) &&
         (typeof cmd.x !== "number" || typeof cmd.z !== "number" || !Number.isFinite(cmd.x) || !Number.isFinite(cmd.z))
       ) {
         ws.send(JSON.stringify({ type: "error", message: "command requires x and z" }));

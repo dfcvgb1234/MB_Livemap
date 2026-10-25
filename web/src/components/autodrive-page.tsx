@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Livemap, MapSlot } from "@/components/livemap";
 import { VehicleSheet } from "@/components/vehicle-sheet";
 import { PlayerSheet } from "@/components/player-sheet";
-import { FieldSheet } from "@/components/field-sheet";
+import { FieldSheet, fieldFromClick, useFieldClickSample } from "@/components/field-sheet";
 import { CourseplayCard } from "@/components/courseplay-card";
 import { ConnectionBanner } from "@/components/connection-banner";
 import { useLivemapContext } from "@/components/livemap-provider";
@@ -16,7 +16,7 @@ export function AutoDrivePage() {
     useLivemapContext();
   const [selected, setSelected] = useState<Vehicle | null>(null);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
-  const [selectedFieldId, setSelectedFieldId] = useState<string | null>(null);
+  const clickSample = useFieldClickSample(sendCommand, lastResult, connection === "connected");
   const [courseId, setCourseId] = useState("");
   const [lane, setLane] = useState(0);
   const [startAt, setStartAt] = useState<CourseplayStart>("first");
@@ -36,7 +36,10 @@ export function AutoDrivePage() {
       ? null
       : (state?.farms?.find((farm) => farm.id === livePlayer.farmId) ?? null);
   const liveField =
-    selectedFieldId == null ? null : (state?.fields.find((field) => field.id === selectedFieldId) ?? null);
+    clickSample.fieldId == null
+      ? null
+      : (state?.fields.find((field) => field.id === clickSample.fieldId) ?? null);
+  const shownField = liveField == null ? null : fieldFromClick(liveField, clickSample.sample);
 
   useEffect(() => {
     const vehicle = new URLSearchParams(window.location.search).get("vehicle");
@@ -49,9 +52,9 @@ export function AutoDrivePage() {
     if (!vehicle) return;
     setSelected(vehicle);
     setSelectedPlayerId(null);
-    setSelectedFieldId(null);
+    clickSample.clear();
     appliedVehicle.current = linkedVehicleId;
-  }, [linkedVehicleId, state]);
+  }, [linkedVehicleId, state, clickSample.clear]);
 
   const networkReady = autoDrive?.available === true;
   const markerCount = autoDrive?.markers?.length ?? 0;
@@ -88,14 +91,14 @@ export function AutoDrivePage() {
         onSelect={(vehicle) => {
           setSelected(vehicle);
           setSelectedPlayerId(null);
-          setSelectedFieldId(null);
+          clickSample.clear();
         }}
         onSelectPlayer={
           state?.multiplayer === true
             ? (player) => {
                 setSelected(null);
                 setSelectedPlayerId(player.id);
-                setSelectedFieldId(null);
+                clickSample.clear();
               }
             : undefined
         }
@@ -110,17 +113,17 @@ export function AutoDrivePage() {
           onSelectVehicle={(vehicle) => {
             setSelected(vehicle);
             setSelectedPlayerId(null);
-            setSelectedFieldId(null);
+            clickSample.clear();
           }}
           onSelectPlayer={(player) => {
             setSelected(null);
             setSelectedPlayerId(player.id);
-            setSelectedFieldId(null);
+            clickSample.clear();
           }}
-          onSelectField={(field) => {
+          onSelectField={(field, point) => {
             setSelected(null);
             setSelectedPlayerId(null);
-            setSelectedFieldId(field.id);
+            clickSample.select(field, point);
           }}
           onScan={(x, z) =>
             connection === "connected" ? sendCommand("field.scan", "", undefined, { x, z }) : ""
@@ -130,7 +133,7 @@ export function AutoDrivePage() {
       </MapSlot>
       <aside className="min-h-0 overflow-visible border-t border-white/10 bg-[#221e18] p-3.5 min-[1536px]:overflow-auto min-[1536px]:border-t-0 min-[1536px]:border-l">
         <ConnectionBanner connection={connection} bridgeStatus={bridgeStatus} error={error} />
-        <FieldSheet field={liveField} />
+        <FieldSheet field={shownField} sampling={clickSample.pending} />
         <PlayerSheet player={livePlayer} farm={liveFarm} />
         {networkReady ? (
           <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5">

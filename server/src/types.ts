@@ -99,6 +99,25 @@ export type Field = {
   precisionFarming?: FieldPrecision | null;
 };
 
+/** Crop, care, and Precision Farming read at one world position. */
+export type FieldPointSample = Pick<
+  Field,
+  | "fruitType"
+  | "growthState"
+  | "growthMax"
+  | "cropState"
+  | "needsRolling"
+  | "needsFertilizer"
+  | "fertilizerLevel"
+  | "fertilizerMax"
+  | "needsSpraying"
+  | "weeds"
+  | "needsPlowing"
+  | "needsLime"
+  | "needsStones"
+  | "precisionFarming"
+>;
+
 export type ProductionFill = {
   name: string;
   fillLevel: number | null;
@@ -231,14 +250,15 @@ export type WhitelistAction =
   | "autodrive.stop"
   | "courseplay.start"
   | "courseplay.stop"
-  | "field.scan";
+  | "field.scan"
+  | "field.sample";
 
 export type CommandMessage = {
   type: "command";
   id: string;
   action: WhitelistAction;
   vehicleId: string;
-  /** World position for field.scan. */
+  /** World position for field.scan and field.sample. */
   x?: number;
   z?: number;
   targetId?: string;
@@ -256,6 +276,8 @@ export type CommandResult = {
   id: string;
   ok: boolean;
   error?: string;
+  /** Present on a successful field.sample. */
+  field?: FieldPointSample;
 };
 
 export type NotificationKind = "arrived" | "stuck" | "problem" | "info" | "finished";
@@ -305,6 +327,7 @@ export const WHITELIST: ReadonlySet<string> = new Set([
   "courseplay.start",
   "courseplay.stop",
   "field.scan",
+  "field.sample",
 ]);
 
 export function emptyState(source: "mod" | "mock" = "mock"): GameState {

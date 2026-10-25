@@ -1,4 +1,7 @@
-import type { Field, FieldPrecision } from "@/lib/types";
+"use client";
+
+import { useCallback, useEffect, useState } from "react";
+import type { CommandResult, Field, FieldPointSample, FieldPrecision, WhitelistAction } from "@/lib/types";
 
 function fieldNumber(field: Field) {
   if (field.name != null && field.name.length > 0) return field.name;
@@ -102,10 +105,80 @@ function PrecisionBlock({ precision }: { precision: FieldPrecision }) {
   );
 }
 
+const CLEARED_SAMPLE: FieldPointSample = {
+  fruitType: null,
+  growthState: null,
+  growthMax: null,
+  cropState: null,
+  needsRolling: null,
+  needsFertilizer: null,
+  fertilizerLevel: null,
+  fertilizerMax: null,
+  needsSpraying: null,
+  weeds: null,
+  needsPlowing: null,
+  needsLime: null,
+  needsStones: null,
+  precisionFarming: null,
+};
+
+/** Field identity stays. Crop, care, and Precision Farming come from the click. */
+export function fieldFromClick(field: Field, sample: FieldPointSample | null) {
+  return { ...field, ...CLEARED_SAMPLE, ...(sample ?? {}) };
+}
+
+export function useFieldClickSample(
+  sendCommand: (
+    action: WhitelistAction,
+    vehicleId: string,
+    targetId?: string,
+    extra?: { x?: number; z?: number },
+  ) => string,
+  lastResult: CommandResult | null,
+  connected: boolean,
+) {
+  const [requestId, setRequestId] = useState<string | null>(null);
+  const [fieldId, setFieldId] = useState<string | null>(null);
+  const [sample, setSample] = useState<FieldPointSample | null>(null);
+  const [pending, setPending] = useState(false);
+
+  useEffect(() => {
+    if (lastResult == null || requestId == null || lastResult.id !== requestId) return;
+    setSample(lastResult.ok && lastResult.field != null ? lastResult.field : null);
+    setPending(false);
+  }, [lastResult, requestId]);
+
+  useEffect(() => {
+    if (!pending || requestId == null) return;
+    const timer = window.setTimeout(() => setPending(false), 10000);
+    return () => window.clearTimeout(timer);
+  }, [pending, requestId]);
+
+  const select = useCallback(
+    (field: Field, point: { x: number; z: number }) => {
+      setFieldId(field.id);
+      setSample(null);
+      const id = connected ? sendCommand("field.sample", "", undefined, point) : "";
+      setRequestId(id === "" ? null : id);
+      setPending(id !== "");
+    },
+    [connected, sendCommand],
+  );
+
+  const clear = useCallback(() => {
+    setFieldId(null);
+    setSample(null);
+    setRequestId(null);
+    setPending(false);
+  }, []);
+
+  return { fieldId, sample, pending, select, clear };
+}
+
 /** Field size, crop state, and care needs for the field selected on the map. */
-export function FieldSheet({ field }: { field: Field | null }) {
+export function FieldSheet({ field, sampling = false }: { field: Field | null; sampling?: boolean }) {
   if (field == null) return null;
-  const crop = field.fruitType != null && field.fruitType.length > 0 ? field.fruitType : "Empty";
+  const crop = sampling ? "…" : field.fruitType != null && field.fruitType.length > 0 ? field.fruitType : "Empty";
   const owned = field.owned == null ? null : field.owned ? "Owned" : "Not owned";
   return (
     <section className="mb-3 rounded-[14px] border border-white/10 bg-[#2b261e] p-3.5 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
@@ -116,7 +189,7 @@ export function FieldSheet({ field }: { field: Field | null }) {
       </p>
       <dl className="mt-3 space-y-1.5">
         <StatRow label="Size" value={formatHa(field.areaHa)} />
-        <StatRow label="Crop state" value={cropStateLine(field)} />
+        <StatRow label="Crop state" value={sampling ? "…" : cropStateLine(field)} />
         <NeedRow label="Needs rolling" value={field.needsRolling} />
         <NeedRow label="Needs fertilizer" value={field.needsFertilizer} detail={fertilizerDetail(field)} />
         <WeedRow value={field.weeds} />
@@ -126,7 +199,7 @@ export function FieldSheet({ field }: { field: Field | null }) {
         <NeedRow label="Needs stones" value={field.needsStones} />
       </dl>
       {field.precisionFarming != null ? <PrecisionBlock precision={field.precisionFarming} /> : null}
-      <p className="mt-3 text-[11px] leading-snug text-[#8d877c]">Sampled at the center of the field.</p>
+      <p className="mt-3 text-[11px] leading-snug text-[#8d877c]">Sampled at cursor click position</p>
     </section>
   );
 }

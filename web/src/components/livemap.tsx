@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { XIcon } from "lucide-react";
 import type { AutoDriveGraph, CommandResult, FarmInfo, Field, GameState, MapPlayer, Vehicle } from "@/lib/types";
 import { fruitColor } from "@/lib/crop-calendar";
 import { machineColor } from "@/lib/machine-colors";
@@ -13,7 +14,7 @@ type Props = {
   state: GameState | null;
   onSelectVehicle: (vehicle: Vehicle) => void;
   onSelectPlayer?: (player: MapPlayer) => void;
-  onSelectField?: (field: Field) => void;
+  onSelectField?: (field: Field, point: { x: number; z: number }) => void;
   selectedId?: string | null;
   selectedPlayerId?: string | null;
   selectedFieldId?: string | null;
@@ -1010,7 +1011,7 @@ export function Livemap({
     });
   }, [scanResult]);
 
-  const selectPressedTarget = (target: EventTarget | null) => {
+  const selectPressedTarget = (target: EventTarget | null, clientX: number, clientY: number) => {
     if (!(target instanceof Element)) return;
     const vehicleButton = target.closest("[data-vehicle-id]");
     const playerButton = target.closest("[data-player-id]");
@@ -1031,7 +1032,17 @@ export function Livemap({
     const fieldId = target.closest("[data-field-id]")?.getAttribute("data-field-id");
     if (fieldId == null || fieldId === "") return;
     const field = fields.find((item) => item.id === fieldId);
-    if (field != null) onSelectField?.(field);
+    if (field == null) return;
+    const viewport = viewportRef.current;
+    if (viewport == null || bounds.w <= 0 || bounds.h <= 0) {
+      onSelectField?.(field, { x: field.x ?? 0, z: field.z ?? 0 });
+      return;
+    }
+    const world = worldFromClient(clientX, clientY, viewport.getBoundingClientRect(), viewRef.current, frame, bounds.w, bounds.h);
+    onSelectField?.(field, {
+      x: Number.isFinite(world.x) ? world.x : (field.x ?? 0),
+      z: Number.isFinite(world.z) ? world.z : (field.z ?? 0),
+    });
   };
 
   const placeScan = (clientX: number, clientY: number) => {
@@ -1156,7 +1167,7 @@ export function Livemap({
       } else {
         placeScan(event.clientX, event.clientY);
       }
-      selectPressedTarget(pressed);
+      selectPressedTarget(pressed, event.clientX, event.clientY);
     }
     pressTargetRef.current = null;
     const viewport = viewportRef.current;
@@ -1443,8 +1454,22 @@ export function Livemap({
               <button
                 type="button"
                 data-scan-button=""
+                aria-label="Close"
+                className="absolute top-0 left-0 flex size-5 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border border-white/15 bg-[#221e18]/92 text-[#f3efe4] shadow-[0_8px_20px_rgba(0,0,0,0.35)] [@media(pointer:coarse)]:size-7"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setScan(null);
+                }}
+              >
+                <XIcon className="size-3 [@media(pointer:coarse)]:size-4" />
+              </button>
+              <button
+                type="button"
+                data-scan-button=""
                 disabled={scan.phase === "scanning"}
-                className={`${toolClass} max-w-64 -translate-x-1/2 -translate-y-[calc(100%+12px)] cursor-pointer text-center whitespace-normal disabled:cursor-default disabled:opacity-80`}
+                className={`${toolClass} max-w-64 -translate-x-1/2 -translate-y-[calc(100%+18px)] cursor-pointer text-center whitespace-normal disabled:cursor-default disabled:opacity-80`}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.preventDefault();

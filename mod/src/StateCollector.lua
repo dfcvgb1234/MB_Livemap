@@ -3261,6 +3261,103 @@ function StateCollector:samplePrecisionFarming(x, z, fruitIndex)
     return info
 end
 
+-- Crop, care, and Precision Farming at one world position. The map click uses
+-- this instead of the field center, matching the in-game cursor sample.
+function StateCollector:sampleFieldPoint(x, z)
+    if type(x) ~= "number" or type(z) ~= "number" then
+        return nil
+    end
+    local fruitType = nil
+    local growthState = nil
+    local growthMax = nil
+    local fruitIndex = nil
+    local sampledState = nil
+    if FieldState ~= nil and FieldState.new ~= nil then
+        local sampled = FieldState.new()
+        local updated = pcall(function()
+            sampled:update(x, z)
+        end)
+        if updated then
+            sampledState = sampled
+            if isKnownFruit(sampled.fruitTypeIndex) then
+                fruitIndex = sampled.fruitTypeIndex
+                growthState = sampled.growthState
+            end
+        end
+    end
+    if type(fruitIndex) == "string" then
+        fruitType = fruitIndex
+    elseif isKnownFruit(fruitIndex) then
+        local named, _, maxGrowth = fruitInfoFromIndex(fruitIndex)
+        fruitType = named
+        growthMax = maxGrowth
+    end
+    if fruitType == nil then
+        local sampledFruit, sampledGrowth, sampledMax = sampleFieldFruit(x, z)
+        fruitType = sampledFruit
+        if growthState == nil then
+            growthState = sampledGrowth
+        end
+        if growthMax == nil then
+            growthMax = sampledMax
+        end
+    end
+    local careState = sampledState
+    local desc = fruitDescFromIndex(fruitIndex)
+    local groundType = type(careState) == "table" and careState.groundType or nil
+    local cropState = cropStateFrom(fruitIndex, growthState, growthMax, groundType)
+    local needsRolling = fieldNeedsRolling(careState, fruitIndex, desc)
+    local needsFertilizer = nil
+    local fertilizerLevel = nil
+    local fertilizerMax = nil
+    local sprayMax = fertilizerApplicationsMax()
+    if type(careState) == "table" and type(careState.sprayLevel) == "number" then
+        fertilizerLevel = careState.sprayLevel
+        fertilizerMax = sprayMax
+        needsFertilizer = careState.sprayLevel < sprayMax
+    end
+    local weeds = nil
+    local weedNeed = nil
+    if type(careState) == "table" and type(careState.weedState) == "number" then
+        weeds = weedLabel(careState.weedState)
+        weedNeed = careState.weedState > 0 and careState.weedState < 7
+    end
+    local weedsEnabled = missionFlag({ "weedsEnabled", "weedsRequired" })
+    local needsSpraying = flagNeed(weedsEnabled, weedNeed)
+    weeds = flagNeed(weedsEnabled, weeds)
+    local plowNeed = nil
+    if type(careState) == "table" and type(careState.plowLevel) == "number" then
+        plowNeed = careState.plowLevel <= 0
+    end
+    local needsPlowing = flagNeed(missionFlag({ "plowingRequiredEnabled", "plowingRequired" }), plowNeed)
+    local limeNeed = nil
+    if type(careState) == "table" and type(careState.limeLevel) == "number" then
+        limeNeed = careState.limeLevel <= 0
+    end
+    local needsLime = flagNeed(missionFlag({ "limeRequired", "limeRequiredEnabled" }), limeNeed)
+    local stoneNeed = nil
+    if type(careState) == "table" and type(careState.stoneLevel) == "number" then
+        stoneNeed = careState.stoneLevel > 0
+    end
+    local needsStones = flagNeed(missionFlag({ "stonesEnabled", "stonesRequired" }), stoneNeed)
+    return {
+        fruitType = fruitType,
+        growthState = growthState,
+        growthMax = growthMax,
+        cropState = cropState,
+        needsRolling = needsRolling,
+        needsFertilizer = needsFertilizer,
+        fertilizerLevel = fertilizerLevel,
+        fertilizerMax = fertilizerMax,
+        needsSpraying = needsSpraying,
+        weeds = weeds,
+        needsPlowing = needsPlowing,
+        needsLime = needsLime,
+        needsStones = needsStones,
+        precisionFarming = self:samplePrecisionFarming(x, z, fruitIndex),
+    }
+end
+
 local function pointInPolygon(x, z, points)
     if type(points) ~= "table" or #points < 3 then
         return false
