@@ -125,19 +125,27 @@ end
 
 function LivemapBridge:courseWatchGeneration()
     local path = self.tcp ~= nil and self.tcp.courseWatchPath or nil
-    if type(path) ~= "string" or type(io) ~= "table" or type(io.open) ~= "function" then
+    if type(path) ~= "string" or XMLFile == nil or XMLFile.loadIfExists == nil then
         return nil
     end
-    local ok, value = pcall(function()
-        local handle = io.open(path, "rb")
-        if handle == nil then
-            return nil
-        end
-        local text = handle:read("*l")
-        handle:close()
-        return tonumber(text)
+    -- io.open cannot read in this sandbox (only mode "w" is allowed), so the
+    -- generation lives in XML like the other bridge files.
+    local xmlFile = nil
+    local ok = pcall(function()
+        xmlFile = XMLFile.loadIfExists("mbLivemapCourseWatch", path)
     end)
-    if not ok or type(value) ~= "number" then
+    if not ok or xmlFile == nil then
+        return nil
+    end
+    local raw = nil
+    pcall(function()
+        raw = xmlFile:getString("coursewatch#generation")
+    end)
+    pcall(function()
+        xmlFile:delete()
+    end)
+    local value = tonumber(raw)
+    if type(value) ~= "number" then
         return nil
     end
     return value
