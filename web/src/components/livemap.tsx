@@ -382,7 +382,6 @@ function FieldPolygon({
 }) {
   if (!field.polygon || field.polygon.length < 3) return null;
   const color = fieldFill(field);
-  const number = field.name && field.name.length > 0 ? field.name : fieldNumber(field.id);
   const points = field.polygon
     .map((p) => {
       const pos = worldToPct(p.x, p.z, frame);
@@ -391,16 +390,13 @@ function FieldPolygon({
     .join(" ");
   return (
     <polygon
-      data-field-id={field.id}
       points={points}
       fill={color}
       fillOpacity={selected ? 0.75 : 0.55}
       stroke={selected ? "#f3efe4" : color}
       strokeOpacity={selected ? 1 : 0.9}
       strokeWidth={selected ? 0.55 : 0.25}
-      className="cursor-pointer"
-      style={{ pointerEvents: "auto" }}
-      aria-label={`Field ${number}`}
+      style={{ pointerEvents: "none" }}
     />
   );
 }
@@ -449,6 +445,37 @@ function AutoDriveRoutes({
       </svg>
     </>
   );
+}
+
+const FIELD_MODES = ["yours", "all", "none"] as const;
+type FieldMode = (typeof FIELD_MODES)[number];
+const FIELD_MODE_LABEL: Record<FieldMode, string> = {
+  yours: "Your fields",
+  all: "All Fields",
+  none: "None",
+};
+
+function nextFieldMode(mode: FieldMode): FieldMode {
+  const index = FIELD_MODES.indexOf(mode);
+  return FIELD_MODES[(index + 1) % FIELD_MODES.length] ?? "yours";
+}
+
+/** Player-owned land, plus boundaries scanned from this livemap. */
+function isYourField(field: Field, localFarmId: number | null | undefined) {
+  if (field.id.startsWith("scan:")) return true;
+  if (typeof field.farmId === "number" && typeof localFarmId === "number") {
+    return field.farmId === localFarmId;
+  }
+  return field.owned === true;
+}
+
+function fieldAtWorld(fields: Field[], x: number, z: number) {
+  for (let index = fields.length - 1; index >= 0; index -= 1) {
+    const field = fields[index];
+    const polygon = field?.polygon;
+    if (polygon != null && polygon.length >= 3 && pointInRing(x, z, polygon)) return field;
+  }
+  return undefined;
 }
 
 const toolClass =
@@ -665,7 +692,7 @@ function FarmList({
 
 function MapChrome({
   showMap,
-  showFields,
+  fieldMode,
   showVehicles,
   showImplements,
   showTrailers,
@@ -682,7 +709,7 @@ function MapChrome({
   selectedPlayerId,
   showFarmNames,
   onMap,
-  onFields,
+  onFieldMode,
   onVehicles,
   onImplements,
   onTrailers,
@@ -696,7 +723,7 @@ function MapChrome({
   colorFor,
 }: {
   showMap: boolean;
-  showFields: boolean;
+  fieldMode: FieldMode;
   showVehicles: boolean;
   showImplements: boolean;
   showTrailers: boolean;
@@ -713,7 +740,7 @@ function MapChrome({
   selectedPlayerId?: string | null;
   showFarmNames: boolean;
   onMap: (next: boolean) => void;
-  onFields: (next: boolean) => void;
+  onFieldMode: () => void;
   onVehicles: (next: boolean) => void;
   onImplements: (next: boolean) => void;
   onTrailers: (next: boolean) => void;
@@ -733,41 +760,55 @@ function MapChrome({
   };
   return (
     <>
-      <div
-        className="absolute top-3 left-3 z-40 flex max-w-[calc(100%-1.5rem)] flex-col items-start gap-2"
-        onPointerDown={(event) => event.stopPropagation()}
-      >
-        <div className="flex flex-wrap gap-2">
-          <LayerToggle label="Map" checked={showMap} onChange={onMap} />
-          <LayerToggle label="Fields" checked={showFields} onChange={onFields} />
-          <LayerToggle label="Vehicles" checked={showVehicles} onChange={onVehicles} />
-          <LayerToggle label="Implements" checked={showImplements} onChange={onImplements} />
-          <LayerToggle label="Trailers" checked={showTrailers} onChange={onTrailers} />
-          {multiplayer ? <LayerToggle label="Players" checked={showPlayers} onChange={onPlayers} /> : null}
-          {multiplayer ? (
+      <div className="pointer-events-none absolute top-3 right-3 left-3 z-40 flex flex-col gap-2">
+        <div className="flex items-start justify-between gap-2">
+          <div
+            className="pointer-events-auto flex min-w-0 flex-wrap gap-2"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            <LayerToggle label="Map" checked={showMap} onChange={onMap} />
             <button
               type="button"
               className={`${toolClass} cursor-pointer`}
-              aria-expanded={farmsOpen}
-              onClick={onFarms}
+              aria-label={`Fields: ${FIELD_MODE_LABEL[fieldMode]}`}
+              onClick={onFieldMode}
             >
-              Farms
+              {FIELD_MODE_LABEL[fieldMode]}
             </button>
-          ) : null}
+            <LayerToggle label="Vehicles" checked={showVehicles} onChange={onVehicles} />
+            <LayerToggle label="Implements" checked={showImplements} onChange={onImplements} />
+            <LayerToggle label="Trailers" checked={showTrailers} onChange={onTrailers} />
+            {multiplayer ? <LayerToggle label="Players" checked={showPlayers} onChange={onPlayers} /> : null}
+            {multiplayer ? (
+              <button
+                type="button"
+                className={`${toolClass} cursor-pointer`}
+                aria-expanded={farmsOpen}
+                onClick={onFarms}
+              >
+                Farms
+              </button>
+            ) : null}
+            <button type="button" className={`${toolClass} cursor-pointer`} onClick={onReset}>
+              Reset view
+            </button>
+          </div>
           <button
             type="button"
-            className={`${toolClass} cursor-pointer max-[1535px]:landscape:hidden`}
+            className={`${toolClass} pointer-events-auto shrink-0 cursor-pointer max-[1535px]:landscape:hidden`}
             aria-expanded={listOpen}
             onClick={onList}
+            onPointerDown={(event) => event.stopPropagation()}
           >
             List
           </button>
-          <button type="button" className={`${toolClass} cursor-pointer`} onClick={onReset}>
-            Reset view
-          </button>
         </div>
         {listOpen ? (
-          <div className="max-h-[min(420px,58vh)] w-[min(280px,calc(100vw-2rem))] overflow-auto rounded-2xl border border-white/10 bg-[#221e18]/95 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)] max-[1535px]:landscape:hidden">
+          <div
+            data-map-scroll=""
+            className="pointer-events-auto ml-auto max-h-[min(420px,58vh)] w-[min(280px,calc(100vw-2rem))] overflow-auto overscroll-contain rounded-2xl border border-white/10 bg-[#221e18]/95 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)] max-[1535px]:landscape:hidden"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
             <EquipmentList
               vehicles={vehicles}
               selectedId={selectedId}
@@ -787,7 +828,11 @@ function MapChrome({
           </div>
         ) : null}
         {farmsOpen ? (
-          <div className="max-h-[min(420px,58vh)] w-[min(280px,calc(100vw-2rem))] overflow-auto rounded-2xl border border-white/10 bg-[#221e18]/95 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)]">
+          <div
+            data-map-scroll=""
+            className="pointer-events-auto max-h-[min(420px,58vh)] w-[min(280px,calc(100vw-2rem))] overflow-auto overscroll-contain rounded-2xl border border-white/10 bg-[#221e18]/95 p-2 shadow-[0_16px_40px_rgba(0,0,0,0.28)]"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
             <FarmList
               farms={farms}
               localFarmId={localFarmId}
@@ -835,7 +880,8 @@ export function MapSlot({
       </div>
       <div aria-hidden className="hidden w-10 shrink-0 touch-pan-y max-[1535px]:landscape:block" />
       <div
-        className="min-h-0 min-w-0 flex-1 overflow-y-auto bg-[#221e18] p-3 max-[1535px]:portrait:hidden min-[1536px]:hidden"
+        data-map-scroll=""
+        className="min-h-0 min-w-0 flex-1 overflow-y-auto overscroll-contain bg-[#221e18] p-3 max-[1535px]:portrait:hidden min-[1536px]:hidden"
         onPointerDown={(event) => event.stopPropagation()}
       >
         <EquipmentList
@@ -875,7 +921,7 @@ export function Livemap({
   const [hovered, setHovered] = useState<string | null>(null);
   const [view, setView] = useState<View>({ x: 0, y: 0, scale: 1 });
   const [showMap, setShowMap] = useState(true);
-  const [showFields, setShowFields] = useState(true);
+  const [fieldMode, setFieldMode] = useState<FieldMode>("yours");
   const [showVehicles, setShowVehicles] = useState(true);
   const [showImplements, setShowImplements] = useState(true);
   const [showTrailers, setShowTrailers] = useState(true);
@@ -919,9 +965,15 @@ export function Livemap({
     return mapFrame(mapSize, fields, routes);
   }, [mapSize, fields, showRoutes, autoDrive]);
 
+  const drawnFields = useMemo(() => {
+    if (fieldMode === "none") return [];
+    if (fieldMode === "all") return fields;
+    return fields.filter((field) => isYourField(field, state?.localFarmId));
+  }, [fieldMode, fields, state?.localFarmId]);
+
   const hasPolygons = useMemo(
-    () => fields.some((f) => f.polygon && f.polygon.length >= 3),
-    [fields],
+    () => drawnFields.some((f) => f.polygon && f.polygon.length >= 3),
+    [drawnFields],
   );
   const imageBox = useMemo(
     () => mapImageBox(mapSize, frame, settings.mapImageFit),
@@ -943,6 +995,8 @@ export function Livemap({
     observer.observe(viewport);
 
     const onWheel = (event: WheelEvent) => {
+      const target = event.target instanceof Element ? event.target : event.target instanceof Node ? event.target.parentElement : null;
+      if (target?.closest("[data-map-scroll]")) return;
       event.preventDefault();
       const rect = viewport.getBoundingClientRect();
       const factor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
@@ -1029,19 +1083,24 @@ export function Livemap({
       if (vehicle != null) onSelectVehicle(vehicle);
       return;
     }
-    const fieldId = target.closest("[data-field-id]")?.getAttribute("data-field-id");
-    if (fieldId == null || fieldId === "") return;
-    const field = fields.find((item) => item.id === fieldId);
-    if (field == null) return;
+    const fieldId =
+      target instanceof Element ? target.closest("[data-field-id]")?.getAttribute("data-field-id") : null;
+    const domField =
+      fieldId == null || fieldId === "" ? undefined : drawnFields.find((item) => item.id === fieldId);
     const viewport = viewportRef.current;
-    if (viewport == null || bounds.w <= 0 || bounds.h <= 0) {
-      onSelectField?.(field, { x: field.x ?? 0, z: field.z ?? 0 });
-      return;
-    }
-    const world = worldFromClient(clientX, clientY, viewport.getBoundingClientRect(), viewRef.current, frame, bounds.w, bounds.h);
+    const world =
+      viewport == null || bounds.w <= 0 || bounds.h <= 0
+        ? null
+        : worldFromClient(clientX, clientY, viewport.getBoundingClientRect(), viewRef.current, frame, bounds.w, bounds.h);
+    const field =
+      domField ??
+      (world != null && Number.isFinite(world.x) && Number.isFinite(world.z)
+        ? fieldAtWorld(drawnFields, world.x, world.z)
+        : undefined);
+    if (field == null) return;
     onSelectField?.(field, {
-      x: Number.isFinite(world.x) ? world.x : (field.x ?? 0),
-      z: Number.isFinite(world.z) ? world.z : (field.z ?? 0),
+      x: world != null && Number.isFinite(world.x) ? world.x : (field.x ?? 0),
+      z: world != null && Number.isFinite(world.z) ? world.z : (field.z ?? 0),
     });
   };
 
@@ -1072,8 +1131,10 @@ export function Livemap({
   };
 
   const onPointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (event.target instanceof Element && event.target.closest("[data-scan-button]")) return;
+    if (event.target instanceof Element && event.target.closest("[data-scan-button], [data-map-scroll]")) return;
     if (event.button !== 0 && event.pointerType === "mouse") return;
+    // Chrome drops the rest of the gesture when a drag starts on an SVG shape or a text selection.
+    event.preventDefault();
     pressTargetRef.current = event.target;
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     try {
@@ -1085,10 +1146,26 @@ export function Livemap({
   };
 
   const onPointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const viewport = viewportRef.current;
+    if (viewport != null && bounds.w > 0 && bounds.h > 0 && gestureRef.current?.moved !== true) {
+      const world = worldFromClient(
+        event.clientX,
+        event.clientY,
+        viewport.getBoundingClientRect(),
+        viewRef.current,
+        frame,
+        bounds.w,
+        bounds.h,
+      );
+      const over =
+        Number.isFinite(world.x) && Number.isFinite(world.z)
+          ? fieldAtWorld(drawnFields, world.x, world.z)
+          : undefined;
+      viewport.style.cursor = over != null ? "pointer" : "";
+    }
     if (!pointersRef.current.has(event.pointerId)) return;
     pointersRef.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
     const gesture = gestureRef.current;
-    const viewport = viewportRef.current;
     if (gesture == null || viewport == null) return;
 
     const rect = viewport.getBoundingClientRect();
@@ -1172,7 +1249,11 @@ export function Livemap({
     pressTargetRef.current = null;
     const viewport = viewportRef.current;
     const active = document.activeElement;
-    if (viewport != null && active instanceof HTMLElement && viewport.contains(active)) {
+    if (
+      viewport != null &&
+      (active instanceof HTMLElement || active instanceof SVGElement) &&
+      viewport.contains(active)
+    ) {
       active.blur();
     }
     if (pointersRef.current.size === 0) {
@@ -1185,7 +1266,7 @@ export function Livemap({
   const mapChrome = (
     <MapChrome
       showMap={showMap}
-      showFields={showFields}
+      fieldMode={fieldMode}
       showVehicles={showVehicles}
       showImplements={showImplements}
       showTrailers={showTrailers}
@@ -1202,7 +1283,7 @@ export function Livemap({
       selectedPlayerId={selectedPlayerId}
       showFarmNames={showFarmNames}
       onMap={setShowMap}
-      onFields={setShowFields}
+      onFieldMode={() => setFieldMode((mode) => nextFieldMode(mode))}
       onVehicles={setShowVehicles}
       onImplements={setShowImplements}
       onTrailers={setShowTrailers}
@@ -1241,11 +1322,15 @@ export function Livemap({
   return (
     <div
       ref={viewportRef}
-      className="relative h-full w-full touch-none overflow-hidden bg-[#100e0b] [contain:layout]"
+      className="relative h-full w-full touch-none overflow-hidden bg-[#100e0b] select-none [contain:layout]"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endPointer}
       onPointerCancel={endPointer}
+      onDragStart={(event) => event.preventDefault()}
+      onPointerLeave={() => {
+        if (viewportRef.current != null) viewportRef.current.style.cursor = "";
+      }}
     >
       <div
         className="pointer-events-none absolute inset-0"
@@ -1264,7 +1349,7 @@ export function Livemap({
         />
       ) : null}
       <div
-        className="absolute inset-0 z-[1] origin-top-left"
+        className="absolute inset-0 z-[1] origin-top-left touch-none"
         style={
           view.x !== 0 || view.y !== 0 || view.scale !== 1
             ? {
@@ -1277,19 +1362,19 @@ export function Livemap({
           <div className="absolute inset-0 opacity-[0.15] [background-image:linear-gradient(rgba(255,255,255,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.08)_1px,transparent_1px)] [background-size:64px_64px]" />
         )}
 
-        {showFields && hasPolygons ? (
+        {hasPolygons ? (
           <svg
-            className="pointer-events-none absolute inset-0 z-0 h-full w-full"
+            className="pointer-events-none absolute inset-0 z-0 h-full w-full touch-none"
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
           >
-            {fields.map((f) => (
+            {drawnFields.map((f) => (
               <FieldPolygon key={f.id} field={f} frame={frame} selected={selectedFieldId === f.id} />
             ))}
           </svg>
         ) : null}
-        {showFields && !hasPolygons
-          ? fields.map((f) => (
+        {!hasPolygons
+          ? drawnFields.map((f) => (
               <FieldMarker key={f.id} field={f} frame={frame} selected={selectedFieldId === f.id} />
             ))
           : null}
@@ -1389,25 +1474,23 @@ export function Livemap({
 
       {bounds.w > 0 ? (
         <div className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
-          {showFields
-            ? fields.map((field) => {
-                const pos = fieldAnchor(field, frame);
-                if (pos == null) return null;
-                const point = screenOf(pos, bounds.w, bounds.h, view);
-                const crop = field.fruitType ?? "Empty";
-                const number = field.name && field.name.length > 0 ? field.name : fieldNumber(field.id);
-                return (
-                  <AnchoredLabel
-                    key={`label-${field.id}`}
-                    x={point.x}
-                    y={point.y}
-                    className="shrink-0 whitespace-nowrap rounded bg-stone-950/75 px-1 py-0.5 text-[10px] font-medium text-stone-50 [@media(pointer:coarse)]:text-[13px]"
-                  >
-                    {number} · {crop}
-                  </AnchoredLabel>
-                );
-              })
-            : null}
+          {drawnFields.map((field) => {
+            const pos = fieldAnchor(field, frame);
+            if (pos == null) return null;
+            const point = screenOf(pos, bounds.w, bounds.h, view);
+            const crop = field.fruitType ?? "Empty";
+            const number = field.name && field.name.length > 0 ? field.name : fieldNumber(field.id);
+            return (
+              <AnchoredLabel
+                key={`label-${field.id}`}
+                x={point.x}
+                y={point.y}
+                className="shrink-0 whitespace-nowrap rounded bg-stone-950/75 px-1 py-0.5 text-[10px] font-medium text-stone-50 [@media(pointer:coarse)]:text-[13px]"
+              >
+                {number} · {crop}
+              </AnchoredLabel>
+            );
+          })}
           {showRoutes
             ? (autoDrive?.markers ?? []).map((marker) => {
                 const point = screenOf(worldToPct(marker.x, marker.z, frame), bounds.w, bounds.h, view);

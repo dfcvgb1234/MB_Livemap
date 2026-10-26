@@ -97,6 +97,8 @@ export type Field = {
   growthState: number | null;
   growthMax: number | null;
   owned: boolean | null;
+  /** Farm that owns this land. Omitted when the land is for sale or the mod did not send an owner. */
+  farmId?: number | null;
   x: number | null;
   z: number | null;
   polygon: Array<{ x: number; z: number }> | null;

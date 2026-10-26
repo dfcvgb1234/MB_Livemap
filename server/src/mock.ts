@@ -326,6 +326,7 @@ export function createMockState(t = Date.now()): GameState {
     const w = 280;
     const h = 320;
     const fruit = FRUITS[i % FRUITS.length];
+    const farmId = i < 6 ? 1 : i < 9 ? 2 : null;
     const growthMax = 8;
     const growthState = clamp(Math.floor(((phase / 40 + i * 1.7) % growthMax) + 1), 1, growthMax);
     const cropState = growthState >= growthMax - 1 ? "Ready to harvest" : "Growing";
@@ -338,7 +339,8 @@ export function createMockState(t = Date.now()): GameState {
       fruitType: fruit,
       growthState,
       growthMax,
-      owned: i < 9,
+      owned: farmId != null,
+      farmId,
       x: ox + w / 2,
       z: oz + h / 2,
       polygon: [
@@ -423,7 +425,8 @@ export function createMockState(t = Date.now()): GameState {
       daysPerPeriod: 3,
     },
     vehicles: listed,
-    ...(multiplayer ? { multiplayer: true as const, localFarmId, farms, players } : {}),
+    localFarmId: localFarmId ?? 1,
+    ...(multiplayer ? { multiplayer: true as const, farms, players } : {}),
     weather: {
       condition,
       temperatureC,

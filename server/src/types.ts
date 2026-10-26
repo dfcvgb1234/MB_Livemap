@@ -82,6 +82,7 @@ export type Field = {
   growthState: number | null;
   growthMax: number | null;
   owned: boolean | null;
+  farmId?: number | null;
   x: number | null;
   z: number | null;
   polygon: Array<{ x: number; z: number }> | null;

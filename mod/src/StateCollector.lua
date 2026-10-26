@@ -4058,6 +4058,7 @@ function StateCollector:collectFields()
             local growthState = nil
             local growthMax = nil
             local owned = nil
+            local fieldFarmId = nil
             local fx, fz = nil, nil
             local polygon = nil
             local areaHa = nil
@@ -4197,7 +4198,8 @@ function StateCollector:collectFields()
                     farmland = g_farmlandManager:getFarmlandById(field.farmlandId)
                 end
                 if farmland ~= nil then
-                    owned = farmland.farmId ~= nil and farmland.farmId > 0
+                    fieldFarmId = positiveFarmId(farmland.farmId)
+                    owned = fieldFarmId ~= nil
                 end
                 areaHa = fieldAreaHa(field, farmland, nil)
                 if areaHa == nil then
@@ -4215,6 +4217,7 @@ function StateCollector:collectFields()
                 growthState = growthState,
                 growthMax = growthMax,
                 owned = owned,
+                farmId = fieldFarmId,
                 x = fx,
                 z = fz,
                 polygon = polygon,
@@ -4835,9 +4838,12 @@ function StateCollector:buildSnapshot(include)
     if everything or include.vehicles then
         snapshot.calendar = self:collectCalendar()
         snapshot.vehicles = self:collectVehicles()
+        local ownFarm = localFarmId()
+        if ownFarm ~= nil then
+            snapshot.localFarmId = ownFarm
+        end
         if isHostedMultiplayer() then
             snapshot.multiplayer = true
-            snapshot.localFarmId = localFarmId()
             snapshot.farms = collectFarms()
             snapshot.players = collectPlayers()
         end
