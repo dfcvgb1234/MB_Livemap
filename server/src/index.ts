@@ -65,7 +65,9 @@ const SETTINGS_DIR =
 const COMMAND_FILE = path.join(SETTINGS_DIR, "commands.xml");
 const FARM_FILE = path.join(SETTINGS_DIR, "farms.xml");
 const SESSION_FILE = path.join(SETTINGS_DIR, "session.xml");
-const COURSE_WATCH_FILE = path.join(SETTINGS_DIR, "coursewatch.txt");
+// The FS25 sandbox can read files only through its XML API, so this stays XML.
+const COURSE_WATCH_FILE = path.join(SETTINGS_DIR, "coursewatch.xml");
+const LEGACY_COURSE_WATCH_FILE = path.join(SETTINGS_DIR, "coursewatch.txt");
 const TOKEN = process.env.MB_LIVEMAP_TOKEN ?? "";
 const STATIC_ROOT = staticRootFromEnv();
 const DESKTOP = STATIC_ROOT !== "";
@@ -253,12 +255,22 @@ const registeredCourseMtime = new Map<string, number>();
 let courseRefreshPending = false;
 let courseRefreshPendingAt = 0;
 
+function generationFromText(text: string): number | null {
+  const attr = text.match(/generation="(\d+)"/);
+  const raw = attr != null ? attr[1] : text.trim();
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return null;
+  return Math.floor(value);
+}
+
 function readCourseWatchGeneration(): number {
-  try {
-    const value = Number(readFileSync(COURSE_WATCH_FILE, "utf8").trim());
-    if (Number.isFinite(value) && value >= 0) return Math.floor(value);
-  } catch {
-    // No watch file yet.
+  for (const file of [COURSE_WATCH_FILE, LEGACY_COURSE_WATCH_FILE]) {
+    try {
+      const value = generationFromText(readFileSync(file, "utf8"));
+      if (value != null) return value;
+    } catch {
+      // Missing or unreadable. Try the other file.
+    }
   }
   return 0;
 }
@@ -294,16 +306,36 @@ function rememberCourseMtimes(courses: CourseplayCourses, fromMock: boolean) {
   }
 }
 
+function retireLegacyCourseWatch() {
+  try {
+    if (existsSync(LEGACY_COURSE_WATCH_FILE)) unlinkSync(LEGACY_COURSE_WATCH_FILE);
+  } catch {
+    // The game keeps the old text file open until the save is reloaded.
+  }
+}
+
 function publishCourseWatch(generation: number) {
   mkdirSync(SETTINGS_DIR, { recursive: true });
+  const body = `<?xml version="1.0" encoding="utf-8" standalone="no"?>\n<coursewatch generation="${generation}"/>\n`;
   const tmp = `${COURSE_WATCH_FILE}.tmp`;
-  writeFileSync(tmp, `${generation}\n`, "utf8");
+  writeFileSync(tmp, body, "utf8");
   try {
     unlinkSync(COURSE_WATCH_FILE);
   } catch {
     // The first publish has nothing to replace.
   }
   renameSync(tmp, COURSE_WATCH_FILE);
+  retireLegacyCourseWatch();
+}
+
+if (!existsSync(COURSE_WATCH_FILE)) {
+  try {
+    publishCourseWatch(courseWatchGeneration);
+  } catch (err) {
+    console.warn("[courseplay] could not write course watch:", err instanceof Error ? err.message : err);
+  }
+} else {
+  retireLegacyCourseWatch();
 }
 
 function coursesAreNewer(): boolean {

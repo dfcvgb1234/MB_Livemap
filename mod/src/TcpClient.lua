@@ -74,7 +74,10 @@ function TcpClient:initCommandFiles()
     self.sessionPath = dir .. "session.xml"
     self.farmFilterPath = dir .. "farms.xml"
     self.performancePath = dir .. "performance.xml"
-    self.courseWatchPath = dir .. "coursewatch.txt"
+    self.courseWatchPath = dir .. "coursewatch.xml"
+    if deleteFile ~= nil and fileExists ~= nil and fileExists(dir .. "coursewatch.txt") then
+        pcall(deleteFile, dir .. "coursewatch.txt")
+    end
     if deleteFile ~= nil and fileExists ~= nil and fileExists(self.commandPath) then
         pcall(deleteFile, self.commandPath)
     end

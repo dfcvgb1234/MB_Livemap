@@ -143,6 +143,6 @@ The window can be minimized. The icon by the clock brings it back. Closing the w
 | `web/` | The farm page |
 | `release/` | The scripts that zip the mod and build the player folder |
 | `Documents\My Games\FarmingSimulator2025\mods\FS25_MB_Livemap.zip` | The mod the game loads |
-| `Documents\My Games\FarmingSimulator2025\modSettings\FS25_MB_Livemap\` | `commands.xml`, `session.xml`, `farms.xml`, `performance.xml`, `coursewatch.txt`, and the page's saved settings |
+| `Documents\My Games\FarmingSimulator2025\modSettings\FS25_MB_Livemap\` | `commands.xml`, `session.xml`, `farms.xml`, `performance.xml`, `coursewatch.xml`, and the page's saved settings |
 
 Logs for the packaged program are in its `app\logs\bridge.log`.
