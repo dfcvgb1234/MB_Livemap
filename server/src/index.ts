@@ -2,7 +2,6 @@ import { randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer as createTcpServer, type Socket } from "node:net";
-import { homedir } from "node:os";
 import path from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
 import { Hono } from "hono";
@@ -44,6 +43,7 @@ import {
   setMockMultiplayer,
   startMockInjector,
 } from "./mock.js";
+import { documentsDir } from "./documentsDir.js";
 import { handleMcpHttp } from "./mcpHttp.js";
 
 enableLogFile(process.env.MB_LIVEMAP_LOG ?? "");
@@ -55,13 +55,13 @@ const PIPE_PATH = process.env.MB_LIVEMAP_PIPE ?? "\\\\.\\pipe\\mb-livemap";
 const SETTINGS_DIR =
   process.env.MB_LIVEMAP_SETTINGS_DIR ??
   path.join(
-    homedir(),
-    "Documents",
+    documentsDir(),
     "My Games",
     "FarmingSimulator2025",
     "modSettings",
     "FS25_MB_Livemap",
   );
+console.log(`[settings] ${SETTINGS_DIR}`);
 const COMMAND_FILE = path.join(SETTINGS_DIR, "commands.xml");
 const FARM_FILE = path.join(SETTINGS_DIR, "farms.xml");
 const SESSION_FILE = path.join(SETTINGS_DIR, "session.xml");
