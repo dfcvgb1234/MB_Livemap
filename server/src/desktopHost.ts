@@ -1,10 +1,11 @@
 import { appendFileSync, copyFileSync, createReadStream, existsSync, mkdirSync, statSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { createServer as createTcpServer, type Socket } from "node:net";
-import { homedir, networkInterfaces } from "node:os";
+import { networkInterfaces } from "node:os";
 import path from "node:path";
 import { getRequestListener } from "@hono/node-server";
 import { WebSocketServer } from "ws";
+import { documentsDir } from "./documentsDir.js";
 
 const TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
@@ -64,7 +65,7 @@ export function installBundledMod() {
   const zip = process.env.MB_LIVEMAP_MOD_ZIP ?? "";
   if (!zip || !existsSync(zip)) return;
 
-  const modsDir = path.join(homedir(), "Documents", "My Games", "FarmingSimulator2025", "mods");
+  const modsDir = path.join(documentsDir(), "My Games", "FarmingSimulator2025", "mods");
   if (!existsSync(modsDir)) return;
 
   try {

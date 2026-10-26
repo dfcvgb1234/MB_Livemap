@@ -9,11 +9,11 @@ import {
   writeFileSync,
   type Dirent,
 } from "node:fs";
-import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 import { decode as decodeJpeg } from "jpeg-js";
 import { decodeDds, encodePng } from "./dds.js";
+import { documentsDir } from "./documentsDir.js";
 import { withZip, type ZipEntryInfo } from "./zipList.js";
 import type { GameState } from "./types.js";
 
@@ -322,7 +322,7 @@ function rmQuiet(file: string) {
 }
 
 function modsDirectory(): string {
-  return path.join(homedir(), "Documents", "My Games", "FarmingSimulator2025", "mods");
+  return path.join(documentsDir(), "My Games", "FarmingSimulator2025", "mods");
 }
 
 function directFile(dir: string | null): string | null {
